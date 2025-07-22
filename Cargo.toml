@@ -1,0 +1,89 @@
+[package] 
+name = "noml"
+version = "0.1.0"
+edition = "2021"
+readme  = "README.md"
+license = "Apache-2.0"
+
+documentation = "https://docs.rs/noml"
+repository    = "https://github.com/noml-lang/noml-rust"
+homepage      = "https://github.com/noml-lang/noml-rust"
+
+description = "A blazing-fast configuration library for NOML (Nested Object Markup Language) with advanced features including variable interpolation, imports, schema validation, and comment preservation"
+keywords = [
+    "noml", 
+    "config", 
+    "parser", 
+    "markup",
+    "toml",
+]
+categories = [
+    "config",
+    "parsing", 
+    "data-structures",
+    "development-tools"
+]
+exclude = [
+    ".github/",
+    "benches/",
+    "docs/",
+    "dev/",
+]
+
+authors = [
+    "James Gober <code@jamesgober.dev>"
+]
+
+[dependencies]
+# Core parsing
+chumsky = "1.0"
+# Serialization support
+serde = { version = "1.0", features = ["derive"] }
+# Error handling
+thiserror = "1.0"
+# Logging and tracing
+tracing = "0.1"
+# Date/time handling for native types
+chrono = { version = "0.4", features = ["serde"], optional = true }
+# Regex for advanced string processing
+regex = "1.0"
+# Path manipulation
+pathdiff = "0.2"
+
+[dev-dependencies]
+# Testing framework
+tokio-test = "0.4"
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+# Property testing
+proptest = "1.0"
+# Snapshot testing
+insta = "1.0"
+
+[features]
+default = ["chrono"]
+# Optional features for advanced functionality
+full = ["chrono"]
+# Minimal build without optional deps
+minimal = []
+
+[[bench]]
+name = "parser_benchmarks"
+harness = false
+
+[[bench]]
+name = "interpolation_benchmarks" 
+harness = false
+
+[profile.release]
+# Maximum optimization for legendary performance
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+# Optimized for accurate benchmarking
+opt-level = 3
+lto = true
+codegen-units = 1
