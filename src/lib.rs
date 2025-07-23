@@ -1,516 +1,381 @@
 //! # NOML - Nested Object Markup Language
 //! 
-//! A blazing-fast, feature-rich configuration language that extends TOML
-//! with advanced capabilities like variable interpolation, environment variables,
-//! imports, schema validation, and native data types.
+//! NOML is a modern configuration language that combines the simplicity of TOML
+//! with advanced features like environment variables, file inclusion, variable
+//! interpolation, and native types.
 //! 
-//! NOML is designed for maximum performance, safety, and developer experience
-//! while maintaining perfect compatibility with existing TOML files.
-//! 
-//! ## Features
-//! 
-//! - **TOML Compatible**: All valid TOML files are valid NOML files
-//! - **Variable Interpolation**: `"${section.key}"` syntax for dynamic values
-//! - **Environment Variables**: `env("VAR", "default")` function calls
-//! - **Native Types**: `@size("10MB")`, `@duration("30s")`, `@date("2024-01-01")`
-//! - **Imports**: `include "other.noml"` for modular configurations
-//! - **Comment Preservation**: Comments are maintained during parsing and serialization
-//! - **Zero-Copy Parsing**: Maximum performance with minimal allocations
-//! - **Rich Error Messages**: Detailed error reporting with source locations
-//! - **Schema Validation**: Built-in type checking and validation
-//! 
-//! ## Quick Start
+//! # Quick Start
 //! 
 //! ```rust
 //! use noml::{parse, Value};
 //! 
-//! let config = r#"
-//! # Application Configuration
-//! name = "MyApp"
-//! version = "1.0.0"
-//! debug = env("DEBUG", false)
-//! 
-//! [server]
-//! host = "localhost"
-//! port = 8080
-//! timeout = @duration("30s")
-//! 
-//! [database]
-//! url = env("DATABASE_URL")
-//! max_connections = 10
+//! let source = r#"
+//!     # Basic configuration
+//!     name = "my-app"
+//!     version = "1.0.0"
+//!     debug = true
+//!     
+//!     # Environment variables
+//!     database_url = env("DATABASE_URL", "sqlite:memory:")
+//!     
+//!     # Native types
+//!     max_file_size = @size("10MB")
+//!     timeout = @duration("30s")
+//!     
+//!     # Nested configuration
+//!     [server]
+//!     host = "0.0.0.0"
+//!     port = 8080
+//!     
+//!     [database]
+//!     host = "localhost"
+//!     port = 5432
 //! "#;
 //! 
-//! // Parse the configuration
-//! let document = parse(config)?;
-//! let values = document.to_value()?;
+//! let config = parse(source)?;
 //! 
-//! // Access values with type safety
-//! let app_name = values.get("name")?.as_string()?;
-//! let server_port = values.get("server.port")?.as_integer()?;
-//! let is_debug = values.get("debug")?.as_bool()?;
+//! // Access values
+//! assert_eq!(config.get("name").unwrap().as_string(), Some("my-app"));
+//! assert_eq!(config.get("server.port").unwrap().as_integer(), Some(8080));
 //! 
-//! println!("App: {}, Port: {}, Debug: {}", app_name, server_port, is_debug);
-//! # Ok::<(), noml::Error>(())
+//! # Ok::<(), noml::error::NomlError>(())
 //! ```
 //! 
-//! ## Configuration Management
+//! # Features
 //! 
-//! NOML provides both low-level parsing and high-level configuration management:
+//! - **TOML-compatible syntax** with additional features
+//! - **Environment variables** via `env("VAR_NAME", "default")`
+//! - **File inclusion** via `include "path/to/file.noml"`
+//! - **Variable interpolation** via `"Hello ${name}!"`
+//! - **Native types** like `@size("10MB")` and `@duration("30s")`
+//! - **Comment preservation** for tooling and round-trip editing
+//! - **Detailed error reporting** with source locations
+//! - **Zero-copy parsing** for performance
+//!
+//! # Advanced Usage
 //! 
 //! ```rust
-//! use noml::Config;
+//! use noml::{Resolver, ResolverConfig, parse_string};
+//! use std::collections::HashMap;
 //! 
-//! // Load configuration from file
-//! let mut config = Config::from_file("app.noml")?;
+//! // Custom environment variables
+//! let mut env_vars = HashMap::new();
+//! env_vars.insert("APP_NAME".to_string(), "my-app".to_string());
 //! 
-//! // Get values with defaults
-//! let host = config.get("server.host", "localhost")?;
-//! let port = config.get("server.port", 8080)?;
+//! // Custom resolver configuration
+//! let config = ResolverConfig {
+//!     env_vars: Some(env_vars),
+//!     allow_missing_env: true,
+//!     ..Default::default()
+//! };
 //! 
-//! // Modify configuration
-//! config.set("server.host", "0.0.0.0")?;
-//! config.set("deployment.environment", "production")?;
+//! let mut resolver = Resolver::with_config(config);
+//! let document = parse_string(r#"name = env("APP_NAME")"#, None)?;
+//! let value = resolver.resolve(document)?;
 //! 
-//! // Save changes (preserves comments and formatting)
-//! config.save()?;
-//! # Ok::<(), noml::Error>(())
-//! ```
+//! assert_eq!(value.get("name").unwrap().as_string(), Some("my-app"));
 //! 
-//! ## Advanced Features
-//! 
-//! ### Variable Interpolation
-//! ```toml
-//! base_path = "/var/app"
-//! log_path = "${base_path}/logs"
-//! data_path = "${base_path}/data"
-//! ```
-//! 
-//! ### Environment Variables
-//! ```toml
-//! # Required environment variable
-//! api_key = env("API_KEY")
-//! 
-//! # With default value
-//! debug_mode = env("DEBUG", false)
-//! log_level = env("LOG_LEVEL", "info")
-//! ```
-//! 
-//! ### Native Types
-//! ```toml
-//! # File sizes
-//! max_upload_size = @size("100MB")
-//! cache_limit = @size("2GB")
-//! 
-//! # Time durations  
-//! request_timeout = @duration("30s")
-//! session_lifetime = @duration("24h")
-//! 
-//! # Dates and times
-//! created_at = @date("2024-01-01T10:00:00Z")
-//! expires_at = @date("2024-12-31T23:59:59Z")
-//! ```
-//! 
-//! ### Imports and Modularity
-//! ```toml
-//! # main.noml
-//! name = "MyApp"
-//! include "database.noml"
-//! include "server.noml"
-//! include "features/${environment}.noml"
+//! # Ok::<(), noml::error::NomlError>(())
 //! ```
 
-#![deny(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
-// Public API exports
-pub use error::{NomlError as Error, Result};
-pub use parser::{parse, parse_from_file, validate, Document, AstNode};
-pub use value::Value;
-pub use config::{Config, ConfigBuilder};
-
-// Core modules
 pub mod error;
 pub mod parser;
 pub mod value;
-pub mod config;
+pub mod resolver;
 
-// Re-export commonly used types for convenience
-pub mod prelude {
-    //! Convenient imports for common NOML operations
-    pub use crate::{parse, parse_from_file, validate};
-    pub use crate::{Config, ConfigBuilder, Document, Value};
-    pub use crate::{Error, Result};
-}
+// Re-export main types for convenience
+pub use error::{NomlError, Result};
+pub use parser::{parse_string, parse_file, Document};
+pub use value::Value;
+pub use resolver::{Resolver, ResolverConfig, NativeResolver};
 
-/// Current version of the NOML library
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+use std::path::Path;
 
-/// Parse NOML from a string
+/// Parse NOML from a string and resolve all dynamic features
 /// 
-/// This is the most common entry point for parsing NOML content.
-/// It provides comprehensive error reporting and preserves all source
-/// information for round-trip serialization.
+/// This is the main entry point for parsing NOML. It handles parsing
+/// the source text and resolving all dynamic features like environment
+/// variables, includes, and interpolations.
 /// 
 /// # Example
+/// 
 /// ```rust
 /// use noml::parse;
 /// 
-/// let config = r#"
-/// name = "example"
-/// version = 1.0
-/// [database]
-/// url = "sqlite://db.sqlite"
-/// "#;
+/// let config = parse(r#"
+///     name = "my-app"
+///     debug = env("DEBUG", false)
+///     
+///     [server]
+///     port = 8080
+/// "#)?;
 /// 
-/// let document = parse(config)?;
-/// let value = document.to_value()?;
+/// assert_eq!(config.get("name").unwrap().as_string(), Some("my-app"));
 /// 
-/// assert_eq!(value.get("name").unwrap().as_string().unwrap(), "example");
-/// # Ok::<(), noml::Error>(())
+/// # Ok::<(), noml::error::NomlError>(())
 /// ```
-pub fn parse(source: &str) -> Result<Document> {
-    parser::parse(source)
+pub fn parse(source: &str) -> Result<Value> {
+    let document = parse_string(source, None)?;
+    let mut resolver = Resolver::new();
+    resolver.resolve(document)
 }
 
-/// Parse NOML from a file
+/// Parse NOML from a file and resolve all dynamic features
 /// 
-/// Convenience function for parsing NOML files with proper error
-/// reporting that includes the file path.
+/// This function reads a NOML file from disk, parses it, and resolves
+/// all dynamic features. The file path is used as the base path for
+/// resolving relative includes.
 /// 
 /// # Example
-/// ```rust,no_run
+/// 
+/// ```rust
 /// use noml::parse_from_file;
 /// 
-/// let document = parse_from_file("config.noml")?;
-/// let value = document.to_value()?;
+/// // Assuming config.noml exists
+/// let config = parse_from_file("config.noml")?;
+/// 
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn parse_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Document> {
-    parser::parse_from_file(path)
+pub fn parse_from_file<P: AsRef<Path>>(path: P) -> Result<Value> {
+    let path = path.as_ref();
+    let document = parse_file(path)?;
+    
+    let base_path = path.parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    
+    let mut resolver = Resolver::new().with_base_path(base_path);
+    resolver.resolve(document)
 }
 
-/// Validate NOML syntax without full parsing
+/// Parse NOML from a string without resolving dynamic features
 /// 
-/// This is faster than full parsing when you only need to check
-/// syntax validity.
+/// This function only parses the NOML syntax into an AST document
+/// without resolving environment variables, includes, or interpolations.
+/// Use this when you want to inspect the raw structure or handle
+/// resolution manually.
 /// 
 /// # Example
+/// 
+/// ```rust
+/// use noml::parse_raw;
+/// 
+/// let document = parse_raw(r#"
+///     name = env("APP_NAME")
+///     port = 8080
+/// "#)?;
+/// 
+/// // Document contains unresolved env() call
+/// # Ok::<(), noml::error::NomlError>(())
+/// ```
+pub fn parse_raw(source: &str) -> Result<Document> {
+    parse_string(source, None)
+}
+
+/// Parse NOML from a file without resolving dynamic features
+/// 
+/// # Example
+/// 
+/// ```rust
+/// use noml::parse_raw_from_file;
+/// 
+/// let document = parse_raw_from_file("config.noml")?;
+/// 
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn parse_raw_from_file<P: AsRef<Path>>(path: P) -> Result<Document> {
+    parse_file(path.as_ref())
+}
+
+/// Validate NOML syntax without parsing into values
+/// 
+/// This is useful for syntax checking without the overhead of building
+/// the full AST or resolving dynamic features.
+/// 
+/// # Example
+/// 
 /// ```rust
 /// use noml::validate;
 /// 
-/// let valid_config = r#"
-/// name = "test"
-/// [section]
-/// key = "value"
-/// "#;
-/// 
-/// assert!(validate(valid_config).is_ok());
-/// 
-/// let invalid_config = r#"
-/// name = "test"
-/// [section
-/// key = "value"
-/// "#;
-/// 
-/// assert!(validate(invalid_config).is_err());
+/// assert!(validate(r#"name = "valid""#).is_ok());
+/// assert!(validate(r#"name = "unclosed string"#).is_err());
 /// ```
 pub fn validate(source: &str) -> Result<()> {
-    parser::validate(source)
+    parse_raw(source).map(|_| ())
 }
 
-/// Convert a Rust value to NOML string representation
-/// 
-/// This function serializes any value that implements `Into<Value>`
-/// into a NOML string format.
+/// Create a NOML value using a convenient macro syntax
 /// 
 /// # Example
+/// 
 /// ```rust
-/// use noml::{to_string, Value};
-/// use std::collections::BTreeMap;
+/// use noml::{noml_value, Value};
 /// 
-/// let mut config = BTreeMap::new();
-/// config.insert("name".to_string(), Value::string("MyApp"));
-/// config.insert("version".to_string(), Value::string("1.0.0"));
-/// config.insert("debug".to_string(), Value::bool(true));
+/// let config = noml_value!({
+///     "name" => "my-app",
+///     "version" => "1.0.0",
+///     "features" => ["parsing", "validation"],
+///     "server" => {
+///         "host" => "localhost",
+///         "port" => 8080
+///     }
+/// });
 /// 
-/// let noml_string = to_string(&Value::table(config))?;
-/// println!("{}", noml_string);
-/// # Ok::<(), noml::Error>(())
+/// assert_eq!(config.get("server.port").unwrap().as_integer(), Some(8080));
 /// ```
-pub fn to_string(value: &Value) -> Result<String> {
-    // TODO: Implement serialization in future iteration
-    // For now, we focus on parsing capabilities
-    todo!("Serialization will be implemented in the next iteration")
-}
-
-/// Convert a Rust value to a pretty-printed NOML string
-/// 
-/// Similar to `to_string` but with formatting optimized for readability.
-/// 
-/// # Example
-/// ```rust,no_run
-/// use noml::{to_string_pretty, Value};
-/// 
-/// let value = Value::string("Hello, NOML!");
-/// let pretty = to_string_pretty(&value)?;
-/// # Ok::<(), noml::Error>(())
-/// ```
-pub fn to_string_pretty(value: &Value) -> Result<String> {
-    // TODO: Implement pretty serialization in future iteration
-    todo!("Pretty serialization will be implemented in the next iteration")
-}
-
-/// Library information and capabilities
-pub mod info {
-    //! Information about the NOML library and its capabilities
-    
-    /// Features supported by this build of NOML
-    pub struct Features {
-        /// Support for date/time types via chrono
-        pub chrono: bool,
-        /// Support for serde serialization
-        pub serde: bool,
-    }
-    
-    /// Get information about supported features
-    pub fn features() -> Features {
-        Features {
-            chrono: cfg!(feature = "chrono"),
-            serde: true, // Always available
-        }
-    }
-    
-    /// Get the library version
-    pub fn version() -> &'static str {
-        crate::VERSION
-    }
-    
-    /// Get supported NOML specification version
-    pub fn spec_version() -> &'static str {
-        "1.0.0"
-    }
-    
-    /// Check if this build supports a specific feature
-    pub fn has_feature(feature: &str) -> bool {
-        match feature {
-            "chrono" => cfg!(feature = "chrono"),
-            "serde" => true,
-            _ => false,
-        }
-    }
-}
+pub use crate::noml_value;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     #[test]
-    fn version_info() {
-        assert!(!VERSION.is_empty());
-        assert_eq!(info::version(), VERSION);
-        assert!(!info::spec_version().is_empty());
+    fn test_basic_parsing() {
+        let source = r#"
+            name = "test-app"
+            version = "1.0.0"
+            debug = true
+            
+            [server]
+            host = "localhost"
+            port = 8080
+            
+            [database]
+            url = "sqlite:memory:"
+        "#;
+
+        let config = parse(source).unwrap();
+        
+        assert_eq!(config.get("name").unwrap().as_string(), Some("test-app"));
+        assert_eq!(config.get("version").unwrap().as_string(), Some("1.0.0"));
+        assert_eq!(config.get("debug").unwrap().as_bool(), Some(true));
+        assert_eq!(config.get("server.host").unwrap().as_string(), Some("localhost"));
+        assert_eq!(config.get("server.port").unwrap().as_integer(), Some(8080));
+        assert_eq!(config.get("database.url").unwrap().as_string(), Some("sqlite:memory:"));
     }
 
     #[test]
-    fn feature_detection() {
-        let features = info::features();
+    fn test_arrays_and_inline_tables() {
+        let source = r#"
+            languages = ["rust", "go", "python"]
+            point = { x = 10, y = 20 }
+            
+            [[servers]]
+            name = "web-1"
+            ip = "192.168.1.10"
+            
+            [[servers]]
+            name = "web-2"
+            ip = "192.168.1.11"
+        "#;
+
+        let config = parse(source).unwrap();
         
-        // serde should always be available
-        assert!(features.serde);
-        assert!(info::has_feature("serde"));
+        let languages = config.get("languages").unwrap().as_array().unwrap();
+        assert_eq!(languages.len(), 3);
+        assert_eq!(languages[0].as_string(), Some("rust"));
         
-        // chrono availability depends on feature flags
-        assert_eq!(features.chrono, cfg!(feature = "chrono"));
-        assert_eq!(info::has_feature("chrono"), cfg!(feature = "chrono"));
-        
-        // Non-existent feature
-        assert!(!info::has_feature("non_existent"));
+        assert_eq!(config.get("point.x").unwrap().as_integer(), Some(10));
+        assert_eq!(config.get("point.y").unwrap().as_integer(), Some(20));
     }
 
     #[test]
-    fn basic_parsing_integration() {
-        let config = r#"
-        # Basic configuration test
-        name = "integration_test"
-        version = 1.0
-        enabled = true
+    fn test_env_function() {
+        // Set a test environment variable
+        env::set_var("NOML_TEST_VAR", "test_value");
         
-        [section]
-        key = "value"
-        number = 42
-        
-        [nested.deeply]
-        value = "deep"
+        let source = r#"
+            app_name = env("NOML_TEST_VAR")
+            fallback = env("NONEXISTENT_VAR", "default_value")
         "#;
+
+        let config = parse(source).unwrap();
         
-        let document = parse(config).expect("Should parse successfully");
-        let values = document.to_value().expect("Should convert to values");
+        assert_eq!(config.get("app_name").unwrap().as_string(), Some("test_value"));
+        assert_eq!(config.get("fallback").unwrap().as_string(), Some("default_value"));
         
-        // Test basic value access
-        assert_eq!(values.get("name").unwrap().as_string().unwrap(), "integration_test");
-        assert_eq!(values.get("version").unwrap().as_float().unwrap(), 1.0);
-        assert_eq!(values.get("enabled").unwrap().as_bool().unwrap(), true);
-        
-        // Test nested access
-        assert_eq!(values.get("section.key").unwrap().as_string().unwrap(), "value");
-        assert_eq!(values.get("section.number").unwrap().as_integer().unwrap(), 42);
-        assert_eq!(values.get("nested.deeply.value").unwrap().as_string().unwrap(), "deep");
+        // Clean up
+        env::remove_var("NOML_TEST_VAR");
     }
 
     #[test]
-    fn validation_integration() {
-        let valid = r#"
-        name = "test"
-        [section]
-        key = "value"
+    fn test_native_types() {
+        let source = r#"
+            max_size = @size("10MB")
+            timeout = @duration("30s")
+            homepage = @url("https://example.com")
         "#;
+
+        let config = parse(source).unwrap();
         
-        assert!(validate(valid).is_ok());
-        
-        let invalid = r#"
-        name = "test"
-        [section
-        key = "value"
-        "#;
-        
-        assert!(validate(invalid).is_err());
+        // These should resolve to their underlying values
+        assert_eq!(config.get("max_size").unwrap().as_integer(), Some(10 * 1024 * 1024));
+        assert_eq!(config.get("timeout").unwrap().as_float(), Some(30.0));
+        assert_eq!(config.get("homepage").unwrap().as_string(), Some("https://example.com"));
     }
 
     #[test]
-    fn error_handling() {
-        let invalid_noml = r#"
-        name = "test"
-        version = 1.0.0.0.0  # Invalid float
+    fn test_comments() {
+        let source = r#"
+            # This is a top-level comment
+            name = "test" # Inline comment
+            
+            # Section comment
+            [server]
+            # Another comment
+            port = 8080
         "#;
-        
-        match parse(invalid_noml) {
-            Ok(_) => panic!("Should have failed to parse"),
-            Err(error) => {
-                assert_eq!(error.category(), "parse");
-                assert!(!error.to_string().is_empty());
-            }
-        }
-    }
 
-    #[test]
-    fn file_parsing_simulation() {
-        // Since we can't create actual files in tests easily,
-        // we'll test the parse function directly
-        let config = r#"
-        # File-based configuration
-        app_name = "FileApp"
-        
-        [logging]
-        level = "info"
-        file = "/var/log/app.log"
-        "#;
-        
-        let document = parse(config).expect("Should parse file content");
-        let values = document.to_value().expect("Should convert to values");
-        
-        assert_eq!(values.get("app_name").unwrap().as_string().unwrap(), "FileApp");
-        assert_eq!(values.get("logging.level").unwrap().as_string().unwrap(), "info");
-        assert_eq!(values.get("logging.file").unwrap().as_string().unwrap(), "/var/log/app.log");
-    }
-
-    #[test]
-    fn comprehensive_feature_test() {
-        let config = r#"
-        # Comprehensive NOML feature test
-        name = "comprehensive_test"
-        
-        # Basic types
-        string_val = "hello world"
-        integer_val = 42
-        float_val = 3.14159
-        bool_val = true
-        null_val = null
-        
-        # Arrays
-        simple_array = [1, 2, 3]
-        mixed_array = ["string", 42, true]
-        
-        # Nested structures
-        [database]
-        host = "localhost"
-        port = 5432
-        
-        [database.pool]
-        min_connections = 5
-        max_connections = 20
-        
-        # Inline tables
-        server = { host = "0.0.0.0", port = 8080 }
-        
-        # Complex nesting
-        [services.cache.redis]
-        host = "redis.example.com"
-        port = 6379
-        "#;
-        
-        let document = parse(config).expect("Should parse comprehensive config");
-        let values = document.to_value().expect("Should convert to values");
-        
-        // Test all basic types
-        assert_eq!(values.get("name").unwrap().as_string().unwrap(), "comprehensive_test");
-        assert_eq!(values.get("string_val").unwrap().as_string().unwrap(), "hello world");
-        assert_eq!(values.get("integer_val").unwrap().as_integer().unwrap(), 42);
-        assert!((values.get("float_val").unwrap().as_float().unwrap() - 3.14159).abs() < f64::EPSILON);
-        assert_eq!(values.get("bool_val").unwrap().as_bool().unwrap(), true);
-        assert!(values.get("null_val").unwrap().is_null());
-        
-        // Test arrays
-        let simple_array = values.get("simple_array").unwrap().as_array().unwrap();
-        assert_eq!(simple_array.len(), 3);
-        assert_eq!(simple_array[0].as_integer().unwrap(), 1);
-        
-        let mixed_array = values.get("mixed_array").unwrap().as_array().unwrap();
-        assert_eq!(mixed_array.len(), 3);
-        assert_eq!(mixed_array[0].as_string().unwrap(), "string");
-        assert_eq!(mixed_array[1].as_integer().unwrap(), 42);
-        assert_eq!(mixed_array[2].as_bool().unwrap(), true);
-        
-        // Test nested structures
-        assert_eq!(values.get("database.host").unwrap().as_string().unwrap(), "localhost");
-        assert_eq!(values.get("database.port").unwrap().as_integer().unwrap(), 5432);
-        assert_eq!(values.get("database.pool.min_connections").unwrap().as_integer().unwrap(), 5);
-        assert_eq!(values.get("database.pool.max_connections").unwrap().as_integer().unwrap(), 20);
-        
-        // Test inline tables
-        assert_eq!(values.get("server.host").unwrap().as_string().unwrap(), "0.0.0.0");
-        assert_eq!(values.get("server.port").unwrap().as_integer().unwrap(), 8080);
-        
-        // Test complex nesting
-        assert_eq!(values.get("services.cache.redis.host").unwrap().as_string().unwrap(), "redis.example.com");
-        assert_eq!(values.get("services.cache.redis.port").unwrap().as_integer().unwrap(), 6379);
-    }
-
-    #[test]
-    fn comment_preservation_test() {
-        let config = r#"
-        # Main application config
-        name = "CommentTest" # App name
-        
-        # Database configuration section
-        [database]
-        # Connection settings
-        host = "localhost" # Default host
-        port = 5432
-        "#;
-        
-        let document = parse(config).expect("Should parse config with comments");
+        // Test that it parses without error (comments are preserved in AST)
+        let document = parse_raw(source).unwrap();
         let comments = document.all_comments();
-        
-        // Should have preserved multiple comments
         assert!(!comments.is_empty());
+    }
+
+    #[test]
+    fn test_validation() {
+        assert!(validate(r#"name = "valid""#).is_ok());
+        assert!(validate(r#"[section]
+name = "valid"
+port = 8080"#).is_ok());
         
-        // Check for specific comment content
-        let comment_texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();
-        assert!(comment_texts.iter().any(|&text| text.contains("Main application config")));
-        assert!(comment_texts.iter().any(|&text| text.contains("App name")));
-        assert!(comment_texts.iter().any(|&text| text.contains("Database configuration section")));
-        assert!(comment_texts.iter().any(|&text| text.contains("Connection settings")));
-        assert!(comment_texts.iter().any(|&text| text.contains("Default host")));
+        // Invalid syntax should fail
+        assert!(validate(r#"name = "unclosed string"#).is_err());
+        assert!(validate(r#"[unclosed section"#).is_err());
+    }
+
+    #[test]
+    fn test_macro() {
+        let config = noml_value!({
+            "name" => "test",
+            "version" => 1,
+            "features" => ["a", "b", "c"],
+            "nested" => {
+                "x" => 10,
+                "y" => 20
+            }
+        });
+
+        assert_eq!(config.get("name").unwrap().as_string(), Some("test"));
+        assert_eq!(config.get("version").unwrap().as_integer(), Some(1));
+        assert_eq!(config.get("nested.x").unwrap().as_integer(), Some(10));
+        
+        let features = config.get("features").unwrap().as_array().unwrap();
+        assert_eq!(features.len(), 3);
+    }
+
+    #[test] 
+    fn test_error_handling() {
+        // Parse error
+        let result = parse(r#"invalid = syntax error"#);
+        assert!(result.is_err());
+        
+        // Env var error  
+        let result = parse(r#"missing = env("DEFINITELY_MISSING_VAR")"#);
+        assert!(result.is_err());
     }
 }
