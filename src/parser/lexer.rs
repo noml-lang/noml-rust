@@ -134,7 +134,10 @@ pub enum StringStyle {
     /// Triple single quotes '''string'''
     TripleSingle,
     /// Raw string r"string" or r#"string"#
-    Raw { hashes: usize },
+    Raw {
+        /// Number of `#` characters used in the raw string delimiter
+        hashes: usize,
+    },
 }
 
 /// High-performance lexer with zero-copy tokenization
@@ -171,7 +174,6 @@ impl<'a> Lexer<'a> {
 
     /// Get the next token from the input
     pub fn next_token(&mut self) -> Result<Token<'a>> {
-        self.skip_whitespace();
         self.start_token();
 
         if self.is_eof() {
@@ -180,6 +182,18 @@ impl<'a> Lexer<'a> {
 
         let ch = self.current_char();
         match ch {
+            // Whitespace (spaces, tabs, carriage returns)
+            ' ' | '\t' | '\r' => {
+                while matches!(self.current_char(), ' ' | '\t' | '\r') && !self.is_eof() {
+                    self.advance();
+                }
+                Ok(self.make_token(TokenKind::Whitespace))
+            }
+            // Newline
+            '\n' => {
+                self.advance();
+                Ok(self.make_token(TokenKind::Newline))
+            }
             // Comments
             '#' => self.lex_comment(),
             
@@ -242,12 +256,11 @@ impl<'a> Lexer<'a> {
                 self.advance(); // {
                 Ok(self.make_token(TokenKind::InterpolationStart))
             }
-            
-            // Identifiers and keywords
-            'a'..='z' | 'A'..='Z' | '_' => self.lex_identifier(),
-            
-            // Invalid character
-            _ => {
+            // Identifiers (bare keys, function names)
+            ch if ch.is_ascii_alphabetic() || ch == '_' => self.lex_identifier(),
+
+            // Unknown/invalid character
+            ch => {
                 self.advance();
                 Ok(self.make_token(TokenKind::Invalid(ch)))
             }
@@ -257,17 +270,22 @@ impl<'a> Lexer<'a> {
     /// Tokenize the entire input into a vector of tokens
     pub fn tokenize(&mut self) -> Result<Vec<Token<'a>>> {
         let mut tokens = Vec::new();
-        
+
         loop {
             let token = self.next_token()?;
             let is_eof = matches!(token.kind, TokenKind::Eof);
-            tokens.push(token);
-            
+
+            // Skip whitespace and newline tokens
+            match token.kind {
+                TokenKind::Whitespace | TokenKind::Newline => {}
+                _ => tokens.push(token),
+            }
+
             if is_eof {
                 break;
             }
         }
-        
+
         Ok(tokens)
     }
 
@@ -333,6 +351,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Skip whitespace (but not newlines, which are significant)
+    #[allow(dead_code)]
     fn skip_whitespace(&mut self) {
         while let Some(ch) = self.input[self.pos..].chars().next() {
             match ch {
@@ -759,15 +778,18 @@ mod tests {
 
     #[test]
     fn raw_strings() {
-        let input = r#"r"no\nescapes" r#"with"quotes"#"#;
+        let input = r#"r"no\nescapes""#;
         let tokens = tokenize_string(input).unwrap();
-        
+
         if let TokenKind::String { value, style } = &tokens[0].kind {
             assert_eq!(value, r"no\nescapes");
             assert!(matches!(style, StringStyle::Raw { hashes: 0 }));
         }
-        
-        if let TokenKind::String { value, style } = &tokens[1].kind {
+
+        let input2 = r##"r#"with"quotes"#"##;
+        let tokens2 = tokenize_string(input2).unwrap();
+
+        if let TokenKind::String { value, style } = &tokens2[0].kind {
             assert_eq!(value, r#"with"quotes"#);
             assert!(matches!(style, StringStyle::Raw { hashes: 1 }));
         }

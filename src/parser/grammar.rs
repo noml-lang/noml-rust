@@ -1,8 +1,8 @@
 //! # NOML Grammar and Parser
 //! 
 //! This module implements the NOML parser using a hand-written recursive descent parser.
-//! While we planned to use Chumsky, for the MVP we'll implement a direct parser for speed
-//! and to avoid complex combinator setup. Future versions can migrate to Chumsky for
+//! While we planned to use chumsky, for the MVP we'll implement a direct parser for speed
+//! and to avoid complex combinator setup. Future versions can migrate to chumsky for
 //! more advanced error recovery.
 
 use crate::error::{NomlError, Result};
@@ -269,13 +269,13 @@ impl<'a> NomlParser<'a> {
     fn parse_string_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
         
-        if let TokenKind::String { value, style } = token.kind {
+        if let TokenKind::String { ref value, ref style } = token.kind {
             let ast_value = AstValue::String {
-                value,
-                style: convert_string_style(&style),
+                value: value.clone(),
+                style: convert_string_style(style),
                 has_escapes: false, // TODO: Track this in lexer
             };
-            Ok(AstNode::new(ast_value, token.span))
+            Ok(AstNode::new(ast_value, token.span.clone()))
         } else {
             unreachable!("Expected string token")
         }
@@ -285,12 +285,12 @@ impl<'a> NomlParser<'a> {
     fn parse_integer_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
         
-        if let TokenKind::Integer { value, raw } = token.kind {
+        if let TokenKind::Integer { value, ref raw } = token.kind {
             let ast_value = AstValue::Integer {
                 value,
                 raw: raw.to_string(),
             };
-            Ok(AstNode::new(ast_value, token.span))
+            Ok(AstNode::new(ast_value, token.span.clone()))
         } else {
             unreachable!("Expected integer token")
         }
@@ -300,12 +300,12 @@ impl<'a> NomlParser<'a> {
     fn parse_float_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
         
-        if let TokenKind::Float { value, raw } = token.kind {
+        if let TokenKind::Float { value, ref raw } = token.kind {
             let ast_value = AstValue::Float {
                 value,
                 raw: raw.to_string(),
             };
-            Ok(AstNode::new(ast_value, token.span))
+            Ok(AstNode::new(ast_value, token.span.clone()))
         } else {
             unreachable!("Expected float token")
         }
@@ -317,7 +317,7 @@ impl<'a> NomlParser<'a> {
         
         if let TokenKind::Bool(value) = token.kind {
             let ast_value = AstValue::Bool(value);
-            Ok(AstNode::new(ast_value, token.span))
+            Ok(AstNode::new(ast_value, token.span.clone()))
         } else {
             unreachable!("Expected bool token")
         }
@@ -327,7 +327,7 @@ impl<'a> NomlParser<'a> {
     fn parse_null_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
         let ast_value = AstValue::Null;
-        Ok(AstNode::new(ast_value, token.span))
+        Ok(AstNode::new(ast_value, token.span.clone()))
     }
 
     /// Parse an array
@@ -612,8 +612,8 @@ impl<'a> NomlParser<'a> {
         
         // Parse the path string
         let path_node = self.parse_string_value()?;
-        let path = if let AstValue::String { value, .. } = path_node.value {
-            value
+        let path = if let AstValue::String { ref value, .. } = path_node.value {
+            value.clone()
         } else {
             return Err(NomlError::parse(
                 "Expected string path for include",
@@ -646,8 +646,15 @@ impl<'a> NomlParser<'a> {
     }
 
     /// Advance to next token
-    fn advance(&mut self) -> Result<&Token> {
-        let token = self.peek()?;
+    fn advance(&mut self) -> Result<Token<'a>> {
+        if self.is_at_end() {
+            return Err(NomlError::parse(
+                "Unexpected end of input",
+                self.current_line(),
+                self.current_column(),
+            ));
+        }
+        let token = self.tokens[self.pos].clone();
         self.pos += 1;
         Ok(token)
     }
@@ -674,7 +681,9 @@ impl<'a> NomlParser<'a> {
     /// Consume token or return error
     fn consume_token(&mut self, kind: &TokenKind, message: &str) -> Result<&Token> {
         if self.check_token(kind) {
-            self.advance()
+            let pos = self.pos;
+            self.pos += 1;
+            Ok(&self.tokens[pos])
         } else {
             let token = self.peek()?;
             Err(NomlError::parse(

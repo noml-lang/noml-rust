@@ -32,7 +32,7 @@ pub struct AstNode {
 }
 
 /// Source location information
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     /// Starting byte offset in source
     pub start: usize,
@@ -46,6 +46,19 @@ pub struct Span {
     pub end_line: usize,
     /// Ending column number (1-indexed)
     pub end_column: usize,
+}
+
+impl Default for Span {
+    fn default() -> Self {
+        Span {
+            start: 0,
+            end: 0,
+            start_line: 1,
+            start_column: 1,
+            end_line: 1,
+            end_column: 1,
+        }
+    }
 }
 
 /// Comments associated with an AST node
@@ -90,6 +103,7 @@ pub enum AstValue {
     
     /// Integer value with original text representation
     Integer {
+        /// The integer value
         value: i64,
         /// Original text (for preserving formatting like 0x123, 0o777)
         raw: String,
@@ -97,6 +111,7 @@ pub enum AstValue {
     
     /// Float value with original text representation
     Float {
+        /// The float value
         value: f64,
         /// Original text (for preserving precision and format)
         raw: String,
@@ -104,6 +119,7 @@ pub enum AstValue {
     
     /// String value with quote style preservation
     String {
+        /// The string value
         value: String,
         /// Original quote style (single, double, triple, etc.)
         style: StringStyle,
@@ -113,6 +129,7 @@ pub enum AstValue {
     
     /// Array with formatting preservation
     Array {
+        /// Elements of the array
         elements: Vec<AstNode>,
         /// Whether array is formatted on multiple lines
         multiline: bool,
@@ -200,7 +217,10 @@ pub enum StringStyle {
     /// Triple single quotes '''string'''
     TripleSingle,
     /// Raw string r"string" or r#"string"#
-    Raw { hashes: usize },
+    Raw {
+        /// Number of `#` symbols used in the raw string delimiter
+        hashes: usize,
+    },
 }
 
 impl Document {
@@ -361,19 +381,18 @@ impl AstNode {
             }
             _ => {}
         }
-
-        // No child contains it, so this node is the best match
+        // If no child matches, this node is the match
         Some(self)
     }
 
-    /// Collect all comments from this node and its children
-    pub fn collect_comments(&self, comments: &mut Vec<&Comment>) {
+    /// Collect all comments recursively from this node and its children
+    pub fn collect_comments<'a>(&'a self, comments: &mut Vec<&'a Comment>) {
         // Add comments from this node
-        comments.extend(&self.comments.before);
+        comments.extend(self.comments.before.iter());
         if let Some(ref inline) = self.comments.inline {
             comments.push(inline);
         }
-        comments.extend(&self.comments.after);
+        comments.extend(self.comments.after.iter());
 
         // Recursively collect from children
         match &self.value {
@@ -385,12 +404,12 @@ impl AstNode {
             AstValue::Table { entries, .. } => {
                 for entry in entries {
                     // Entry-specific comments
-                    comments.extend(&entry.comments.before);
+                    comments.extend(entry.comments.before.iter());
                     if let Some(ref inline) = entry.comments.inline {
                         comments.push(inline);
                     }
-                    comments.extend(&entry.comments.after);
-                    
+                    comments.extend(entry.comments.after.iter());
+
                     // Recursively collect from value
                     entry.value.collect_comments(comments);
                 }
@@ -470,9 +489,11 @@ impl AstNode {
 
         let duration_str = match args[0].to_value()? {
             Value::String(s) => s,
-            _ => return Err(NomlError::validation(
-                "duration() argument must be a string"
-            )),
+            _ => {
+                return Err(NomlError::validation(
+                    "duration() argument must be a string"
+                ))
+            }
         };
 
         parse_duration(&duration_str)
@@ -483,44 +504,17 @@ impl AstNode {
             )))
     }
 
-    /// Handle native type constructors
+   /// Handle native type constructors
     fn handle_native_type(&self, type_name: &str, args: &[AstNode]) -> Result<Value> {
         match type_name {
             "size" => self.handle_size_function(args),
             "duration" => self.handle_duration_function(args),
-            #[cfg(feature = "chrono")]
-            "date" => self.handle_date_function(args),
+            // "date" => self.handle_date_function(args), // Disabled: chrono feature not available
             _ => Err(NomlError::validation(format!(
                 "Unknown native type: @{}",
                 type_name
             ))),
         }
-    }
-
-    #[cfg(feature = "chrono")]
-    fn handle_date_function(&self, args: &[AstNode]) -> Result<Value> {
-        if args.len() != 1 {
-            return Err(NomlError::validation(
-                "date() function requires exactly 1 argument"
-            ));
-        }
-
-        let date_str = match args[0].to_value()? {
-            Value::String(s) => s,
-            _ => return Err(NomlError::validation(
-                "date() argument must be a string"
-            )),
-        };
-
-        use chrono::{DateTime, Utc};
-        let dt = DateTime::parse_from_rfc3339(&date_str)
-            .map_err(|_| NomlError::validation(format!(
-                "Invalid date format: {}. Expected RFC3339 format.",
-                date_str
-            )))?
-            .with_timezone(&Utc);
-
-        Ok(Value::DateTime(dt))
     }
 }
 

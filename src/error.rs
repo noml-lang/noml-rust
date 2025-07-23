@@ -3,7 +3,6 @@
 //! Comprehensive error system for NOML parsing, validation, and manipulation.
 //! Designed for clarity, debuggability, and extensibility.
 
-use std::fmt;
 use std::io;
 use thiserror::Error;
 
@@ -15,10 +14,10 @@ pub type Result<T> = std::result::Result<T, NomlError>;
 /// This error system is designed to provide maximum clarity about what went wrong,
 /// where it happened, and how to fix it. Each variant includes enough context
 /// for both developers and end users to understand and resolve issues.
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug)]
 pub enum NomlError {
-    /// Parsing errors - when NOML syntax is invalid
     #[error("Parse error at line {line}, column {column}: {message}")]
+    /// Parsing errors - when the input cannot be parsed due to syntax issues.
     Parse {
         /// Human-readable error message
         message: String,
