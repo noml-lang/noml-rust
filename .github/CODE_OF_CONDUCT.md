@@ -141,10 +141,9 @@
 
 <br><br>
 <div  align="center">
-    <br><h2>⚖️<br><sub>CODE OF CONDUCT</sub></h2>
+    <br><h2>⚖️</h2>
     <sup>
-        <b>1.0.0</b>
-        <br>
+        <b>1.0.0</b><br>
         <sub>JULY-22-2025</sub>
     </sup>
 </div>

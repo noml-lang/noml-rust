@@ -60,6 +60,6 @@ This policy may be updated at any time to reflect new risks, abuses, or legal re
 
 <br><br>
 <div  align="center">
-    <br><h2>⚖️<br><sub>ACCEPTABLE USE POLICY</sub></h2>
+    <br><h2>⚖️</h2>
     <sup><span>1.0.0<span><br><sup>JULY-22-2025</sup></sup>
 </div>

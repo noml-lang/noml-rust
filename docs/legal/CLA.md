@@ -60,6 +60,6 @@
 
 <br><br>
 <div  align="center">
-    <br><h2>⚖️<br><sub>Contributor License Agreement</sub></h2>
-    <sup><span>0.1.0<span><br><sup>JULY-22-2025</sup></sup>
+    <br><h2>⚖️</h2>
+    <sup><span>1.0.0<span><br><sup>JULY-22-2025</sup></sup>
 </div>
