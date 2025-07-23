@@ -25,9 +25,8 @@ use crate::error::Result;
 /// use noml::parser::parse;
 /// 
 /// let source = r#"
-/// # Configuration file
 /// [server]
-/// host = "localhost"
+/// host = "localhost"  
 /// port = 8080
 /// "#;
 /// 
@@ -47,7 +46,8 @@ pub fn parse(source: &str) -> Result<Document> {
 /// ```rust
 /// use noml::parser::parse_from_file;
 /// 
-/// let document = parse_from_file("config.noml")?;
+/// // This would work if config.noml exists:
+/// // let document = parse_from_file("config.noml")?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn parse_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Document> {

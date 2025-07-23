@@ -69,6 +69,9 @@ impl<'a> NomlParser<'a> {
         self.collect_leading_comments(&mut comments);
 
         while !self.is_at_end() {
+            // Collect any leading comments first
+            self.collect_leading_comments(&mut comments);
+            
             // Skip whitespace and newlines
             if self.skip_insignificant_tokens() {
                 continue;
@@ -108,13 +111,22 @@ impl<'a> NomlParser<'a> {
         // Collect comments before the header
         self.collect_leading_comments(&mut comments);
 
-        // Consume '['
+        // Consume first '['
         self.consume_token(&TokenKind::LeftBracket, "Expected '['")?;
+
+        // Check for array of tables syntax [[...]]
+        let is_array_of_tables = self.check_token(&TokenKind::LeftBracket);
+        if is_array_of_tables {
+            self.consume_token(&TokenKind::LeftBracket, "Expected second '['")?;
+        }
 
         // Parse the key path
         let key = self.parse_key()?;
 
-        // Consume ']'
+        // Consume closing brackets
+        if is_array_of_tables {
+            self.consume_token(&TokenKind::RightBracket, "Expected first ']'")?;
+        }
         self.consume_token(&TokenKind::RightBracket, "Expected ']'")?;
 
         // Collect inline comment if present
@@ -128,6 +140,9 @@ impl<'a> NomlParser<'a> {
         // Parse the contents of this table section
         let mut table_entries = Vec::new();
         while !self.is_at_end() && !self.check_token(&TokenKind::LeftBracket) {
+            // Collect any comments first
+            self.collect_leading_comments(&mut comments);
+            
             if self.skip_insignificant_tokens() {
                 continue;
             }
@@ -149,17 +164,55 @@ impl<'a> NomlParser<'a> {
                 entries: table_entries,
                 inline: false,
             },
-            table_span,
+            table_span.clone(),
         );
 
         // Create the table entry
-        let entry = TableEntry {
-            key,
-            value: table_value,
-            comments,
-        };
-
-        entries.push(entry);
+        // For array of tables, we need special handling to create arrays
+        if is_array_of_tables {
+            // Check if we already have an entry with this key
+            if let Some(existing_entry) = entries.iter_mut().find(|e| e.key.to_string() == key.to_string()) {
+                // Convert existing table to array of tables or add to existing array
+                match &mut existing_entry.value.value {
+                    AstValue::Array { elements, .. } => {
+                        // Already an array, add new table
+                        elements.push(table_value);
+                    }
+                    _ => {
+                        // Convert single table to array of tables
+                        let existing_table = existing_entry.value.clone();
+                        let array_value = AstValue::Array {
+                            elements: vec![existing_table, table_value],
+                            multiline: true,
+                            trailing_comma: false,
+                        };
+                        existing_entry.value = AstNode::new(array_value, existing_entry.value.span.clone());
+                    }
+                }
+            } else {
+                // First occurrence - create array with single element
+                let array_value = AstValue::Array {
+                    elements: vec![table_value],
+                    multiline: true,
+                    trailing_comma: false,
+                };
+                let array_node = AstNode::new(array_value, table_span);
+                let entry = TableEntry {
+                    key,
+                    value: array_node,
+                    comments,
+                };
+                entries.push(entry);
+            }
+        } else {
+            // Regular table
+            let entry = TableEntry {
+                key,
+                value: table_value,
+                comments,
+            };
+            entries.push(entry);
+        }
         Ok(())
     }
 

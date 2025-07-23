@@ -302,13 +302,13 @@ impl AstNode {
                 Ok(Value::Array(values))
             }
             AstValue::Table { entries, .. } => {
-                let mut table = BTreeMap::new();
+                let mut value = Value::Table(BTreeMap::new());
                 for entry in entries {
                     let key = entry.key.to_string();
-                    let value = entry.value.to_value()?;
-                    table.insert(key, value);
+                    let entry_value = entry.value.to_value()?;
+                    value.set(&key, entry_value)?;
                 }
-                Ok(Value::Table(table))
+                Ok(value)
             }
             AstValue::FunctionCall { name, args } => {
                 // Handle built-in functions

@@ -10,19 +10,15 @@
 //! use noml::{parse, Value};
 //! 
 //! let source = r#"
-//!     # Basic configuration
 //!     name = "my-app"
 //!     version = "1.0.0"
 //!     debug = true
 //!     
-//!     # Environment variables
 //!     database_url = env("DATABASE_URL", "sqlite:memory:")
 //!     
-//!     # Native types
 //!     max_file_size = @size("10MB")
 //!     timeout = @duration("30s")
 //!     
-//!     # Nested configuration
 //!     [server]
 //!     host = "0.0.0.0"
 //!     port = 8080
@@ -35,8 +31,8 @@
 //! let config = parse(source)?;
 //! 
 //! // Access values
-//! assert_eq!(config.get("name").unwrap().as_string(), Some("my-app"));
-//! assert_eq!(config.get("server.port").unwrap().as_integer(), Some(8080));
+//! assert_eq!(config.get("name").unwrap().as_string().unwrap(), "my-app");
+//! assert_eq!(config.get("server.port").unwrap().as_integer().unwrap(), 8080);
 //! 
 //! # Ok::<(), noml::error::NomlError>(())
 //! ```
@@ -73,7 +69,7 @@
 //! let document = parse_string(r#"name = env("APP_NAME")"#, None)?;
 //! let value = resolver.resolve(document)?;
 //! 
-//! assert_eq!(value.get("name").unwrap().as_string(), Some("my-app"));
+//! assert_eq!(value.get("name").unwrap().as_string().unwrap(), "my-app");
 //! 
 //! # Ok::<(), noml::error::NomlError>(())
 //! ```
@@ -113,7 +109,7 @@ use std::path::Path;
 ///     port = 8080
 /// "#)?;
 /// 
-/// assert_eq!(config.get("name").unwrap().as_string(), Some("my-app"));
+/// assert_eq!(config.get("name").unwrap().as_string().unwrap(), "my-app");
 /// 
 /// # Ok::<(), noml::error::NomlError>(())
 /// ```
@@ -134,8 +130,8 @@ pub fn parse(source: &str) -> Result<Value> {
 /// ```rust
 /// use noml::parse_from_file;
 /// 
-/// // Assuming config.noml exists
-/// let config = parse_from_file("config.noml")?;
+/// // This would work if config.noml exists:
+/// // let config = parse_from_file("config.noml")?;
 /// 
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -182,7 +178,8 @@ pub fn parse_raw(source: &str) -> Result<Document> {
 /// ```rust
 /// use noml::parse_raw_from_file;
 /// 
-/// let document = parse_raw_from_file("config.noml")?;
+/// // This would work if config.noml exists:
+/// // let document = parse_raw_from_file("config.noml")?;
 /// 
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -224,7 +221,7 @@ pub fn validate(source: &str) -> Result<()> {
 ///     }
 /// });
 /// 
-/// assert_eq!(config.get("server.port").unwrap().as_integer(), Some(8080));
+/// assert_eq!(config.get("server.port").unwrap().as_integer().unwrap(), 8080);
 /// ```
 // pub use crate::noml_value; // Removed unresolved import
 
