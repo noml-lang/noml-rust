@@ -8,9 +8,9 @@
     <br>
 </div>
 
-<h2>ACCEPTABLE USE POLICY</h2>
+<br>
 
-### 1. **Prohibited Uses**
+## 1. **Prohibited Uses**
 
 **Users may not use the project, its source code, services, APIs, or any related systems to:**
 * Violate laws or regulations in any jurisdiction.
@@ -22,29 +22,29 @@
 * Deploy for surveillance or military purposes without explicit permission.
 * Attempt unauthorized access to servers, APIs, or internal systems.
 
-<h2></h2><br>
+<br>
 
-### 2. **Fair Usage**
+## 2. **Fair Usage**
 
 **Users must not:**
 * Exploit the system in ways that disrupt services for others.
 * Attempt to subvert or bypass licensing, rate limits, or restrictions.
 * Resell or repackage any hosted service without authorization.
 
-<h2></h2><br>
+<br>
 
-### 3. **Security & Research Exceptions**
+## 3. **Security & Research Exceptions**
 
 **Security researchers may conduct testing only under the following conditions:**
 * Must not involve harm to live systems or users
 * Must disclose any vulnerabilities responsibly
 * Must not extract or retain user data during testing
 
-Contact \[[security@jamesgober.dev](mailto:security@jamesgober.dev)] to coordinate responsible disclosure.
+Contact: [ <a href="mailto:report@jamesgober.dev?subject=Security%20Issue">report@jamesgober.dev</a> ] to coordinate responsible disclosure.
 
-<h2></h2><br>
+<br>
 
-### 4. **Violation Consequences**
+## 4. **Violation Consequences**
 
 **Violations may result in:**
 * Revocation of access or license.
@@ -52,12 +52,13 @@ Contact \[[security@jamesgober.dev](mailto:security@jamesgober.dev)] to coordina
 * Legal action, DMCA filings, or disclosure to authorities.
 * Public listing of violations (*in open source contexts*).
 
-<h2></h2><br>
+<br>
 
-### 5. **Changes to Policy**
+## 5. **Changes to Policy**
 
 This policy may be updated at any time to reflect new risks, abuses, or legal requirements. Latest version will always be available in the `/docs/legal/` directory or appropriate documentation section.
 
+<br><br>
 <div  align="center">
     <br><h2>⚖️<br><sub>ACCEPTABLE USE POLICY</sub></h2>
     <sup><span>1.0.0<span><br><sup>JULY-22-2025</sup></sup>
