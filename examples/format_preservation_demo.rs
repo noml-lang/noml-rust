@@ -35,29 +35,29 @@ languages = ["en", "es", "fr"]
 
     // Load and modify the config
     let mut config = Config::from_file("demo_config.noml")?;
-    
+
     println!("🔧 Making programmatic changes...");
-    
+
     // Change some values
     config.set("app.version", Value::String("2.0.0".to_string()))?;
     config.set("app.debug", Value::Bool(true))?;
     config.set("database.port", Value::Integer(3306))?;
     config.set("features.caching", Value::Bool(true))?;
     config.set("features.experimental.ai_mode", Value::Bool(true))?;
-    
+
     // Add a new value
     config.set("app.environment", Value::String("production".to_string()))?;
-    
+
     // Save back to file
     config.save()?;
-    
+
     println!("✅ Changes saved successfully!\n");
-    
+
     // Read and display the result
     let modified_content = fs::read_to_string("demo_config.noml")?;
     println!("📄 Modified config file:");
     println!("{modified_content}");
-    
+
     // Show what changed
     println!("🔍 What changed:");
     println!("  • app.version: 1.0.0 → 2.0.0");
@@ -66,14 +66,14 @@ languages = ["en", "es", "fr"]
     println!("  • features.caching: false → true");
     println!("  • features.experimental.ai_mode: false → true");
     println!("  • ➕ Added app.environment: production");
-    
+
     println!("\n💡 Note: Full format preservation (comments, spacing) is a planned feature!");
     println!("   Current implementation focuses on reliable read/write of configuration values.");
-    
+
     // Clean up
     fs::remove_file("demo_config.noml")?;
-    
+
     println!("\n🎉 Configuration management demo complete!");
-    
+
     Ok(())
 }
