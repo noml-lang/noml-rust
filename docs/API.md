@@ -73,11 +73,11 @@
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-noml = "0.4.0"
+noml = "0.9.0"
 
 # Optional features
 [dependencies.noml]
-version = "0.4.0"
+version = "0.9.0"
 features = ["async", "chrono"]
 ```
 
