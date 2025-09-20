@@ -1,5 +1,5 @@
 //! # NOML Lexer
-//! 
+//!
 //! High-performance tokenizer for NOML using zero-copy string slicing.
 //! This lexer is designed for maximum speed while preserving all source
 //! information needed for perfect round-trip serialization.
@@ -30,7 +30,7 @@ pub enum TokenKind<'a> {
         /// Original quote style
         style: StringStyle,
     },
-    
+
     /// Integer literal with parsed value and original representation
     Integer {
         /// Parsed integer value
@@ -38,7 +38,7 @@ pub enum TokenKind<'a> {
         /// Original text (preserves hex, octal, binary formats)
         raw: &'a str,
     },
-    
+
     /// Float literal with parsed value and original representation
     Float {
         /// Parsed float value
@@ -46,78 +46,78 @@ pub enum TokenKind<'a> {
         /// Original text (preserves format)
         raw: &'a str,
     },
-    
+
     /// Boolean literal
     Bool(bool),
-    
+
     /// Null literal
     Null,
-    
+
     // Identifiers and keywords
     /// Bare identifier (unquoted key names, function names)
     Identifier(&'a str),
-    
+
     /// Environment variable function
     EnvFunc,
-    
+
     /// Include/import directive
     Include,
-    
+
     // Symbols and operators
     /// = (assignment)
     Equals,
-    
+
     /// . (dot for key paths)
     Dot,
-    
+
     /// , (comma separator)
     Comma,
-    
+
     /// [ (left bracket - array start or table header start)
     LeftBracket,
-    
+
     /// ] (right bracket - array end or table header end)
     RightBracket,
-    
+
     /// { (left brace - inline table start)
     LeftBrace,
-    
+
     /// } (right brace - inline table end)
     RightBrace,
-    
+
     /// ( (left parenthesis - function call start)
     LeftParen,
-    
+
     /// ) (right parenthesis - function call end)
     RightParen,
-    
+
     // String interpolation
     /// ${ (start of interpolation)
     InterpolationStart,
-    
+
     /// } (end of interpolation - context-dependent)
     InterpolationEnd,
-    
+
     /// @ (native type constructor prefix)
     At,
-    
+
     // Whitespace and comments
     /// Line comment starting with #
     Comment {
         /// Comment text without the # prefix
         text: String,
     },
-    
+
     /// Whitespace (spaces, tabs)
     Whitespace,
-    
+
     /// Newline characters
     Newline,
-    
+
     // Special tokens
     /// End of file
     Eof,
-    
+
     /// Invalid/unrecognized character
     Invalid(char),
 }
@@ -196,18 +196,18 @@ impl<'a> Lexer<'a> {
             }
             // Comments
             '#' => self.lex_comment(),
-            
+
             // Strings
             '"' => self.lex_string(StringStyle::Double),
             '\'' => self.lex_string(StringStyle::Single),
             'r' if self.peek_char() == Some('"') || self.peek_char() == Some('#') => {
                 self.lex_raw_string()
             }
-            
+
             // Numbers
             '0'..='9' => self.lex_number(),
             '-' if matches!(self.peek_char(), Some('0'..='9')) => self.lex_number(),
-            
+
             // Symbols
             '=' => {
                 self.advance();
@@ -249,7 +249,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(self.make_token(TokenKind::At))
             }
-            
+
             // Interpolation
             '$' if self.peek_char() == Some('{') => {
                 self.advance(); // $
@@ -379,7 +379,7 @@ impl<'a> Lexer<'a> {
     /// Lex a comment starting with #
     fn lex_comment(&mut self) -> Result<Token<'a>> {
         self.advance(); // Skip #
-        
+
         let mut text = String::new();
         while let Some(ch) = self.input[self.pos..].chars().next() {
             if ch == '\n' {
@@ -388,10 +388,10 @@ impl<'a> Lexer<'a> {
             text.push(ch);
             self.advance();
         }
-        
+
         // Trim leading whitespace from comment
         let text = text.trim_start().to_string();
-        
+
         Ok(self.make_token(TokenKind::Comment { text }))
     }
 
@@ -404,22 +404,22 @@ impl<'a> Lexer<'a> {
         };
 
         self.advance(); // Skip opening quote
-        
+
         let mut value = String::new();
 
         let mut found_closing_quote = false;
         while !self.is_eof() {
             let ch = self.current_char();
-            
+
             if ch == quote_char {
                 self.advance(); // Skip closing quote
                 found_closing_quote = true;
                 break;
             }
-            
+
             if ch == '\\' {
                 self.advance(); // Skip backslash
-                
+
                 if self.is_eof() {
                     return Err(NomlError::parse(
                         "Unterminated string escape",
@@ -427,7 +427,7 @@ impl<'a> Lexer<'a> {
                         self.column,
                     ));
                 }
-                
+
                 match self.current_char() {
                     'n' => value.push('\n'),
                     't' => value.push('\t'),
@@ -447,13 +447,13 @@ impl<'a> Lexer<'a> {
                             ));
                         }
                         self.advance();
-                        
+
                         let mut unicode_value = String::new();
                         while !self.is_eof() && self.current_char() != '}' {
                             unicode_value.push(self.current_char());
                             self.advance();
                         }
-                        
+
                         if self.current_char() != '}' {
                             return Err(NomlError::parse(
                                 "Unterminated unicode escape",
@@ -461,14 +461,11 @@ impl<'a> Lexer<'a> {
                                 self.column,
                             ));
                         }
-                        
-                        let code = u32::from_str_radix(&unicode_value, 16)
-                            .map_err(|_| NomlError::parse(
-                                "Invalid unicode escape value",
-                                self.line,
-                                self.column,
-                            ))?;
-                        
+
+                        let code = u32::from_str_radix(&unicode_value, 16).map_err(|_| {
+                            NomlError::parse("Invalid unicode escape value", self.line, self.column)
+                        })?;
+
                         if let Some(unicode_char) = char::from_u32(code) {
                             value.push(unicode_char);
                         } else {
@@ -523,14 +520,14 @@ impl<'a> Lexer<'a> {
     /// Lex a raw string literal
     fn lex_raw_string(&mut self) -> Result<Token<'a>> {
         self.advance(); // Skip 'r'
-        
+
         // Count hashes
         let mut hashes = 0;
         while self.current_char() == '#' {
             hashes += 1;
             self.advance();
         }
-        
+
         // Expect opening quote
         if self.current_char() != '"' {
             return Err(NomlError::parse(
@@ -540,21 +537,27 @@ impl<'a> Lexer<'a> {
             ));
         }
         self.advance(); // Skip opening quote
-        
+
         let mut value = String::new();
-        
+
         // Find closing sequence: " followed by same number of #
         while !self.is_eof() {
             if self.current_char() == '"' {
                 // Check if followed by correct number of hashes
                 let mut hash_count = 0;
                 let mut temp_pos = self.pos + 1;
-                
-                while temp_pos < self.input.len() && self.input.chars().nth(temp_pos - self.pos + self.char_pos()) == Some('#') {
+
+                while temp_pos < self.input.len()
+                    && self
+                        .input
+                        .chars()
+                        .nth(temp_pos - self.pos + self.char_pos())
+                        == Some('#')
+                {
                     hash_count += 1;
                     temp_pos += 1;
                 }
-                
+
                 if hash_count == hashes {
                     // Found closing sequence
                     self.advance(); // Skip closing quote
@@ -564,11 +567,11 @@ impl<'a> Lexer<'a> {
                     break;
                 }
             }
-            
+
             value.push(self.current_char());
             self.advance();
         }
-        
+
         Ok(self.make_token(TokenKind::String {
             value,
             style: StringStyle::Raw { hashes },
@@ -579,15 +582,15 @@ impl<'a> Lexer<'a> {
     fn lex_number(&mut self) -> Result<Token<'a>> {
         let start_pos = self.pos;
         let is_negative = self.current_char() == '-';
-        
+
         if is_negative {
             self.advance();
         }
-        
+
         // Handle different number formats
         let mut is_float = false;
         let mut base = 10;
-        
+
         // Check for hex, octal, or binary prefix
         if self.current_char() == '0' && !self.is_eof() {
             match self.peek_char() {
@@ -609,7 +612,7 @@ impl<'a> Lexer<'a> {
                 _ => {}
             }
         }
-        
+
         // Read digits
         while !self.is_eof() {
             let ch = self.current_char();
@@ -620,14 +623,14 @@ impl<'a> Lexer<'a> {
                 16 => ch.is_ascii_hexdigit(),
                 _ => false,
             };
-            
+
             if ch == '.' && base == 10 && !is_float {
                 is_float = true;
                 self.advance();
             } else if (ch == 'e' || ch == 'E') && base == 10 {
                 is_float = true;
                 self.advance();
-                
+
                 // Handle optional +/- after e
                 if matches!(self.current_char(), '+' | '-') {
                     self.advance();
@@ -641,19 +644,20 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        
+
         let end_pos = self.pos;
         let raw_text = &self.input[start_pos..end_pos];
         let clean_text = raw_text.replace('_', ""); // Remove digit separators
-        
+
         if is_float {
-            let value = clean_text.parse::<f64>()
-                .map_err(|_| NomlError::parse(
+            let value = clean_text.parse::<f64>().map_err(|_| {
+                NomlError::parse(
                     format!("Invalid float literal: {raw_text}"),
                     self.token_start_line,
                     self.token_start_column,
-                ))?;
-            
+                )
+            })?;
+
             Ok(self.make_token(TokenKind::Float {
                 value,
                 raw: raw_text,
@@ -669,27 +673,30 @@ impl<'a> Lexer<'a> {
                     2 => &clean_text[if is_negative { 3 } else { 2 }..],  // Skip 0b or -0b
                     _ => &clean_text,
                 };
-                
-                let mut result = i64::from_str_radix(digits, base)
-                    .map_err(|_| NomlError::parse(
+
+                let mut result = i64::from_str_radix(digits, base).map_err(|_| {
+                    NomlError::parse(
                         format!("Invalid integer literal: {raw_text}"),
                         self.token_start_line,
                         self.token_start_column,
-                    ))?;
-                
+                    )
+                })?;
+
                 if is_negative {
                     result = -result;
                 }
-                
+
                 Ok(result)
             };
-            
-            let value = value.map_err(|_| NomlError::parse(
-                format!("Invalid integer literal: {raw_text}"),
-                self.token_start_line,
-                self.token_start_column,
-            ))?;
-            
+
+            let value = value.map_err(|_| {
+                NomlError::parse(
+                    format!("Invalid integer literal: {raw_text}"),
+                    self.token_start_line,
+                    self.token_start_column,
+                )
+            })?;
+
             Ok(self.make_token(TokenKind::Integer {
                 value,
                 raw: raw_text,
@@ -700,10 +707,10 @@ impl<'a> Lexer<'a> {
     /// Lex an identifier or keyword
     fn lex_identifier(&mut self) -> Result<Token<'a>> {
         let start = self.pos;
-        
+
         // First character is already validated as alphabetic or underscore
         self.advance();
-        
+
         // Continue with alphanumeric and underscores
         while !self.is_eof() {
             let ch = self.current_char();
@@ -713,9 +720,9 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        
+
         let text = &self.input[start..self.pos];
-        
+
         // Check for keywords
         let kind = match text {
             "true" => TokenKind::Bool(true),
@@ -725,7 +732,7 @@ impl<'a> Lexer<'a> {
             "include" => TokenKind::Include,
             _ => TokenKind::Identifier(text),
         };
-        
+
         Ok(self.make_token(kind))
     }
 }
@@ -775,7 +782,7 @@ mod tests {
     fn basic_tokens() {
         let input = r#"key = "value""#;
         let tokens = tokenize_string(input).unwrap();
-        
+
         assert_eq!(tokens.len(), 4); // identifier, =, string, EOF
         assert!(matches!(tokens[0].kind, TokenKind::Identifier("key")));
         assert!(matches!(tokens[1].kind, TokenKind::Equals));
@@ -792,22 +799,39 @@ mod tests {
     fn numbers() {
         let input = "42 3.14 -10 0xFF 0o755 0b1010";
         let tokens = tokenize_string(input).unwrap();
-        
+
         // Should have integer, float, negative integer, hex, octal, binary + EOF
-        assert!(matches!(tokens[0].kind, TokenKind::Integer { value: 42, .. }));
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Integer { value: 42, .. }
+        ));
         let _ = matches!(tokens[1].kind, TokenKind::Float { value, .. } if (value - 3.14).abs() < f64::EPSILON);
-        assert!(matches!(tokens[1].kind, TokenKind::Float { value, .. } if (value - 3.14).abs() < f64::EPSILON));
-        assert!(matches!(tokens[2].kind, TokenKind::Integer { value: -10, .. }));
-        assert!(matches!(tokens[3].kind, TokenKind::Integer { value: 255, .. })); // 0xFF
-        assert!(matches!(tokens[4].kind, TokenKind::Integer { value: 493, .. })); // 0o755
-        assert!(matches!(tokens[5].kind, TokenKind::Integer { value: 10, .. })); // 0b1010
+        assert!(
+            matches!(tokens[1].kind, TokenKind::Float { value, .. } if (value - 3.14).abs() < f64::EPSILON)
+        );
+        assert!(matches!(
+            tokens[2].kind,
+            TokenKind::Integer { value: -10, .. }
+        ));
+        assert!(matches!(
+            tokens[3].kind,
+            TokenKind::Integer { value: 255, .. }
+        )); // 0xFF
+        assert!(matches!(
+            tokens[4].kind,
+            TokenKind::Integer { value: 493, .. }
+        )); // 0o755
+        assert!(matches!(
+            tokens[5].kind,
+            TokenKind::Integer { value: 10, .. }
+        )); // 0b1010
     }
 
     #[test]
     fn string_escapes() {
         let input = r#""hello\nworld\u{1F4A9}""#;
         let tokens = tokenize_string(input).unwrap();
-        
+
         if let TokenKind::String { value, .. } = &tokens[0].kind {
             assert!(value.contains('\n'));
             assert!(value.contains('💩')); // Unicode poop emoji
@@ -839,16 +863,19 @@ mod tests {
     fn comments() {
         let input = "# This is a comment\nkey = value # Inline comment";
         let tokens = tokenize_string(input).unwrap();
-        
+
         // Should find both comments
-        let comment_tokens: Vec<_> = tokens.iter()
-            .filter_map(|t| if let TokenKind::Comment { text } = &t.kind {
-                Some(text.as_str())
-            } else {
-                None
+        let comment_tokens: Vec<_> = tokens
+            .iter()
+            .filter_map(|t| {
+                if let TokenKind::Comment { text } = &t.kind {
+                    Some(text.as_str())
+                } else {
+                    None
+                }
             })
             .collect();
-        
+
         assert_eq!(comment_tokens.len(), 2);
         assert!(comment_tokens[0].contains("This is a comment"));
         assert!(comment_tokens[1].contains("Inline comment"));
@@ -862,14 +889,18 @@ mod tests {
         ports = [8080, 8081]
         config = { debug = true, timeout = @duration("30s") }
         "#;
-        
+
         let tokens = tokenize_string(input).expect("Should tokenize successfully");
-        
+
         // Should have various token types
-        let has_bracket = tokens.iter().any(|t| matches!(t.kind, TokenKind::LeftBracket));
-        let has_brace = tokens.iter().any(|t| matches!(t.kind, TokenKind::LeftBrace));
+        let has_bracket = tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::LeftBracket));
+        let has_brace = tokens
+            .iter()
+            .any(|t| matches!(t.kind, TokenKind::LeftBrace));
         let has_at = tokens.iter().any(|t| matches!(t.kind, TokenKind::At));
-        
+
         assert!(has_bracket);
         assert!(has_brace);
         assert!(has_at);
@@ -879,11 +910,12 @@ mod tests {
     fn interpolation() {
         let input = r#"path = "${base}/logs""#;
         let tokens = tokenize_string(input).unwrap();
-        
+
         // Should recognize interpolation start token
-        let has_interpolation = tokens.iter()
+        let has_interpolation = tokens
+            .iter()
             .any(|t| matches!(t.kind, TokenKind::InterpolationStart));
-        
+
         assert!(has_interpolation);
     }
 
@@ -891,7 +923,7 @@ mod tests {
     fn keywords() {
         let input = "true false null env include";
         let tokens = tokenize_string(input).unwrap();
-        
+
         assert!(matches!(tokens[0].kind, TokenKind::Bool(true)));
         assert!(matches!(tokens[1].kind, TokenKind::Bool(false)));
         assert!(matches!(tokens[2].kind, TokenKind::Null));
@@ -903,13 +935,13 @@ mod tests {
     fn span_information() {
         let input = "key = \"value\"";
         let tokens = tokenize_string(input).unwrap();
-        
+
         // Check that spans are calculated correctly
         assert_eq!(tokens[0].span.start, 0); // "key" starts at beginning
-        assert_eq!(tokens[0].span.end, 3);   // "key" ends at position 3
+        assert_eq!(tokens[0].span.end, 3); // "key" ends at position 3
         assert_eq!(tokens[1].span.start, 4); // "=" starts after space
         assert_eq!(tokens[2].span.start, 6); // String starts after space
-        
+
         // Check line/column tracking
         assert_eq!(tokens[0].span.start_line, 1);
         assert_eq!(tokens[0].span.start_column, 1);
@@ -920,11 +952,11 @@ mod tests {
         // Unterminated string
         let result = tokenize_string(r#""unterminated"#);
         assert!(result.is_err());
-        
+
         // Invalid escape
         let result = tokenize_string(r#""\q""#);
         assert!(result.is_err());
-        
+
         // Invalid unicode escape
         let result = tokenize_string(r#""\u{GGGG}""#);
         assert!(result.is_err());
