@@ -14,10 +14,7 @@
 # Use clear, descriptive names for configuration sections
 app_name = "my-awesome-app"
 app_version = "1.2.3"
-app_description = """
-A sample application demonstrating basic NOML configuration.
-This description can span multiple lines for detailed explanations.
-"""
+app_description = "A sample application demonstrating basic NOML configuration"
 
 # Basic Configuration Values
 # NOML supports all standard data types
@@ -72,7 +69,7 @@ feature_flags = {
 
 # Logging Configuration
 [logging]
-level = log_level  # Reference previously defined variable
+level = "info"  # Log level setting
 format = "json"
 outputs = ["console", "file"]
 
