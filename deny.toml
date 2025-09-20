@@ -19,8 +19,6 @@ allow = [
 confidence-threshold = 0.8
 
 [bans]
-
-[bans]
 multiple-versions = "warn"
 wildcards = "allow"
 
