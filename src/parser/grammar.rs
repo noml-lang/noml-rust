@@ -178,7 +178,7 @@ impl<'a> NomlParser<'a> {
                 entries: table_entries,
                 inline: false,
             },
-            table_span.clone(),
+            table_span,
         );
 
         // Create the table entry
@@ -187,7 +187,7 @@ impl<'a> NomlParser<'a> {
             // Check if we already have an entry with this key
             if let Some(existing_entry) = entries
                 .iter_mut()
-                .find(|e| e.key.to_string() == key.to_string())
+                .find(|e| e.key == key) // Direct comparison using custom PartialEq
             {
                 // Convert existing table to array of tables or add to existing array
                 match &mut existing_entry.value.value {
@@ -204,7 +204,7 @@ impl<'a> NomlParser<'a> {
                             trailing_comma: false,
                         };
                         existing_entry.value =
-                            AstNode::new(array_value, existing_entry.value.span.clone());
+                            AstNode::new(array_value, existing_entry.value.span); // Copy instead of clone
                     }
                 }
             } else {
@@ -355,7 +355,7 @@ impl<'a> NomlParser<'a> {
                 style: convert_string_style(style),
                 has_escapes,
             };
-            Ok(AstNode::new(ast_value, token.span.clone()))
+            Ok(AstNode::new(ast_value, token.span))
         } else {
             unreachable!("Expected string token")
         }
@@ -370,7 +370,7 @@ impl<'a> NomlParser<'a> {
                 value,
                 raw: raw.to_string(),
             };
-            Ok(AstNode::new(ast_value, token.span.clone()))
+            Ok(AstNode::new(ast_value, token.span))
         } else {
             unreachable!("Expected integer token")
         }
@@ -385,7 +385,7 @@ impl<'a> NomlParser<'a> {
                 value,
                 raw: raw.to_string(),
             };
-            Ok(AstNode::new(ast_value, token.span.clone()))
+            Ok(AstNode::new(ast_value, token.span))
         } else {
             unreachable!("Expected float token")
         }
@@ -397,7 +397,7 @@ impl<'a> NomlParser<'a> {
 
         if let TokenKind::Bool(value) = token.kind {
             let ast_value = AstValue::Bool(value);
-            Ok(AstNode::new(ast_value, token.span.clone()))
+            Ok(AstNode::new(ast_value, token.span))
         } else {
             unreachable!("Expected bool token")
         }
@@ -407,7 +407,7 @@ impl<'a> NomlParser<'a> {
     fn parse_null_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
         let ast_value = AstValue::Null;
-        Ok(AstNode::new(ast_value, token.span.clone()))
+        Ok(AstNode::new(ast_value, token.span))
     }
 
     /// Parse an array
@@ -753,6 +753,7 @@ impl<'a> NomlParser<'a> {
     }
 
     /// Peek at current token
+    #[inline]
     fn peek(&self) -> Result<&Token<'_>> {
         self.tokens
             .get(self.pos)
@@ -760,6 +761,7 @@ impl<'a> NomlParser<'a> {
     }
 
     /// Advance to next token
+    #[inline]
     fn advance(&mut self) -> Result<Token<'a>> {
         if self.is_at_end() {
             return Err(NomlError::parse(
@@ -768,12 +770,13 @@ impl<'a> NomlParser<'a> {
                 self.current_column(),
             ));
         }
-        let token = self.tokens[self.pos].clone();
+        let token = self.tokens[self.pos].clone(); // TODO: Could avoid this clone by changing API
         self.pos += 1;
         Ok(token)
     }
 
     /// Check if current token matches given kind
+    #[inline]
     fn check_token(&self, kind: &TokenKind) -> bool {
         if let Ok(token) = self.peek() {
             std::mem::discriminant(&token.kind) == std::mem::discriminant(kind)
@@ -783,6 +786,7 @@ impl<'a> NomlParser<'a> {
     }
 
     /// Match and consume token if it matches
+    #[inline]
     fn match_token(&mut self, kind: &TokenKind) -> bool {
         if self.check_token(kind) {
             self.pos += 1;
@@ -854,7 +858,7 @@ impl<'a> NomlParser<'a> {
     /// Get current position for span calculation
     fn current_span(&self) -> Span {
         if let Ok(token) = self.peek() {
-            token.span.clone()
+            token.span
         } else {
             // End of file span
             Span::new(
@@ -894,7 +898,7 @@ impl<'a> NomlParser<'a> {
                 TokenKind::Comment { text } => {
                     let comment = Comment {
                         text: text.clone(),
-                        span: token.span.clone(),
+                        span: token.span,
                         style: CommentStyle::Line,
                     };
                     comments.add_before(comment);
@@ -917,7 +921,7 @@ impl<'a> NomlParser<'a> {
             if let TokenKind::Comment { text } = &token.kind {
                 let comment = Comment {
                     text: text.clone(),
-                    span: token.span.clone(),
+                    span: token.span,
                     style: CommentStyle::Line,
                 };
                 self.pos += 1;
