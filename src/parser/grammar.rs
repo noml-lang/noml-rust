@@ -1,5 +1,5 @@
 //! # NOML Grammar and Parser
-//! 
+//!
 //! This module implements the NOML parser using a hand-written recursive descent parser.
 //! While we planned to use chumsky, for the MVP we'll implement a direct parser for speed
 //! and to avoid complex combinator setup. Future versions can migrate to chumsky for
@@ -7,8 +7,8 @@
 
 use crate::error::{NomlError, Result};
 use crate::parser::ast::{
-    AstNode, AstValue, Comment, CommentStyle, Comments, Document, Key, KeySegment, 
-    Span, StringStyle, TableEntry
+    AstNode, AstValue, Comment, CommentStyle, Comments, Document, Key, KeySegment, Span,
+    StringStyle, TableEntry,
 };
 use crate::parser::lexer::{Lexer, StringStyle as LexerStringStyle, Token, TokenKind};
 use std::fs;
@@ -18,14 +18,14 @@ use std::path::Path;
 pub fn parse_string(source: &str, source_path: Option<String>) -> Result<Document> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize()?;
-    
+
     let mut parser = NomlParser::new(tokens, source);
     let mut document = parser.parse()?;
-    
+
     // Set source information
     document.source_path = source_path;
     document.source_text = Some(source.to_string());
-    
+
     Ok(document)
 }
 
@@ -33,16 +33,17 @@ pub fn parse_string(source: &str, source_path: Option<String>) -> Result<Documen
 pub fn parse_file(path: &Path) -> Result<Document> {
     let source = fs::read_to_string(path)
         .map_err(|e| NomlError::io(path.to_string_lossy().to_string(), e))?;
-    
+
     parse_string(&source, Some(path.to_string_lossy().to_string()))
 }
 
 /// Parse NOML from a file asynchronously
 #[cfg(feature = "async")]
 pub async fn parse_file_async(path: &std::path::Path) -> Result<Document> {
-    let source = tokio::fs::read_to_string(path).await
+    let source = tokio::fs::read_to_string(path)
+        .await
         .map_err(|e| NomlError::io(path.to_string_lossy().to_string(), e))?;
-    
+
     parse_string(&source, Some(path.to_string_lossy().to_string()))
 }
 
@@ -59,7 +60,11 @@ pub struct NomlParser<'a> {
 impl<'a> NomlParser<'a> {
     /// Create a new parser
     pub fn new(tokens: Vec<Token<'a>>, source: &'a str) -> Self {
-        Self { tokens, pos: 0, source }
+        Self {
+            tokens,
+            pos: 0,
+            source,
+        }
     }
 
     /// Parse the tokens into a Document
@@ -80,7 +85,7 @@ impl<'a> NomlParser<'a> {
         while !self.is_at_end() {
             // Collect any leading comments first
             self.collect_leading_comments(&mut comments);
-            
+
             // Skip whitespace and newlines
             if self.skip_insignificant_tokens() {
                 continue;
@@ -151,11 +156,11 @@ impl<'a> NomlParser<'a> {
         while !self.is_at_end() && !self.check_token(&TokenKind::LeftBracket) {
             // Collect any comments first
             self.collect_leading_comments(&mut comments);
-            
+
             if self.skip_insignificant_tokens() {
                 continue;
             }
-            
+
             if self.is_at_end() || self.check_token(&TokenKind::LeftBracket) {
                 break;
             }
@@ -180,7 +185,10 @@ impl<'a> NomlParser<'a> {
         // For array of tables, we need special handling to create arrays
         if is_array_of_tables {
             // Check if we already have an entry with this key
-            if let Some(existing_entry) = entries.iter_mut().find(|e| e.key.to_string() == key.to_string()) {
+            if let Some(existing_entry) = entries
+                .iter_mut()
+                .find(|e| e.key.to_string() == key.to_string())
+            {
                 // Convert existing table to array of tables or add to existing array
                 match &mut existing_entry.value.value {
                     AstValue::Array { elements, .. } => {
@@ -195,7 +203,8 @@ impl<'a> NomlParser<'a> {
                             multiline: true,
                             trailing_comma: false,
                         };
-                        existing_entry.value = AstNode::new(array_value, existing_entry.value.span.clone());
+                        existing_entry.value =
+                            AstNode::new(array_value, existing_entry.value.span.clone());
                     }
                 }
             } else {
@@ -228,7 +237,7 @@ impl<'a> NomlParser<'a> {
     /// Parse a key-value pair
     fn parse_key_value_pair(&mut self) -> Result<TableEntry> {
         let mut comments = Comments::new();
-        
+
         // Collect leading comments
         self.collect_leading_comments(&mut comments);
 
@@ -289,8 +298,9 @@ impl<'a> NomlParser<'a> {
                 quoted: true,
                 quote_style: Some(convert_string_style(style)),
             }),
-            _ => Err(NomlError::parse(
-                "Expected identifier or string for key",
+            _ => Err(NomlError::unexpected_token(
+                format!("{}", token.kind),
+                "identifier or string",
                 token.span.start_line,
                 token.span.start_column,
             )),
@@ -319,10 +329,11 @@ impl<'a> NomlParser<'a> {
             TokenKind::InterpolationStart => self.parse_interpolation(),
             TokenKind::Include => self.parse_include(),
 
-            _ => Err(NomlError::parse(
+            _ => Err(NomlError::parse_with_suggestion(
                 format!("Unexpected token: {}", token.kind),
                 token.span.start_line,
                 token.span.start_column,
+                "Expected a value (string, number, boolean, array, or table)",
             )),
         }
     }
@@ -330,12 +341,19 @@ impl<'a> NomlParser<'a> {
     /// Parse a string value
     fn parse_string_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
-        
-        if let TokenKind::String { ref value, ref style } = token.kind {
+
+        if let TokenKind::String {
+            ref value,
+            ref style,
+        } = token.kind
+        {
+            // Check if the original raw text contains escape sequences
+            let has_escapes = token.text.contains('\\');
+
             let ast_value = AstValue::String {
                 value: value.clone(),
                 style: convert_string_style(style),
-                has_escapes: false, // TODO: Track this in lexer
+                has_escapes,
             };
             Ok(AstNode::new(ast_value, token.span.clone()))
         } else {
@@ -346,7 +364,7 @@ impl<'a> NomlParser<'a> {
     /// Parse an integer value
     fn parse_integer_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
-        
+
         if let TokenKind::Integer { value, ref raw } = token.kind {
             let ast_value = AstValue::Integer {
                 value,
@@ -361,7 +379,7 @@ impl<'a> NomlParser<'a> {
     /// Parse a float value
     fn parse_float_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
-        
+
         if let TokenKind::Float { value, ref raw } = token.kind {
             let ast_value = AstValue::Float {
                 value,
@@ -376,7 +394,7 @@ impl<'a> NomlParser<'a> {
     /// Parse a boolean value
     fn parse_bool_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
-        
+
         if let TokenKind::Bool(value) = token.kind {
             let ast_value = AstValue::Bool(value);
             Ok(AstNode::new(ast_value, token.span.clone()))
@@ -395,10 +413,10 @@ impl<'a> NomlParser<'a> {
     /// Parse an array
     fn parse_array(&mut self) -> Result<AstNode> {
         let start_span = self.current_span();
-        
+
         // Consume '['
         self.consume_token(&TokenKind::LeftBracket, "Expected '['")?;
-        
+
         let mut elements = Vec::new();
         let mut multiline = false;
         let mut trailing_comma = false;
@@ -407,7 +425,7 @@ impl<'a> NomlParser<'a> {
         if self.match_token(&TokenKind::RightBracket) {
             let end_span = self.current_span();
             let span = start_span.merge(&end_span);
-            
+
             let ast_value = AstValue::Array {
                 elements,
                 multiline: false,
@@ -439,7 +457,7 @@ impl<'a> NomlParser<'a> {
             if self.match_token(&TokenKind::Comma) {
                 trailing_comma = true;
                 self.skip_whitespace();
-                
+
                 // Check if this was a trailing comma
                 if self.check_token(&TokenKind::RightBracket) {
                     break;
@@ -468,17 +486,17 @@ impl<'a> NomlParser<'a> {
             multiline,
             trailing_comma,
         };
-        
+
         Ok(AstNode::new(ast_value, span))
     }
 
     /// Parse an inline table
     fn parse_inline_table(&mut self) -> Result<AstNode> {
         let start_span = self.current_span();
-        
+
         // Consume '{'
         self.consume_token(&TokenKind::LeftBrace, "Expected '{'")?;
-        
+
         let mut entries = Vec::new();
 
         // Skip whitespace
@@ -488,7 +506,7 @@ impl<'a> NomlParser<'a> {
         if self.match_token(&TokenKind::RightBrace) {
             let end_span = self.current_span();
             let span = start_span.merge(&end_span);
-            
+
             let ast_value = AstValue::Table {
                 entries,
                 inline: true,
@@ -508,7 +526,7 @@ impl<'a> NomlParser<'a> {
             // Check for comma or end
             if self.match_token(&TokenKind::Comma) {
                 self.skip_whitespace();
-                
+
                 // Check for trailing comma
                 if self.check_token(&TokenKind::RightBrace) {
                     break;
@@ -534,28 +552,28 @@ impl<'a> NomlParser<'a> {
             entries,
             inline: true,
         };
-        
+
         Ok(AstNode::new(ast_value, span))
     }
 
     /// Parse env() function
     fn parse_env_function(&mut self) -> Result<AstNode> {
         let start_span = self.current_span();
-        
+
         // Consume 'env'
         self.consume_token(&TokenKind::EnvFunc, "Expected 'env'")?;
-        
+
         // Consume '('
         self.consume_token(&TokenKind::LeftParen, "Expected '('")?;
-        
+
         let mut args = Vec::new();
-        
+
         // Parse arguments
         if !self.check_token(&TokenKind::RightParen) {
             loop {
                 let arg = self.parse_value()?;
                 args.push(arg);
-                
+
                 if self.match_token(&TokenKind::Comma) {
                     self.skip_whitespace();
                     if self.check_token(&TokenKind::RightParen) {
@@ -566,28 +584,28 @@ impl<'a> NomlParser<'a> {
                 }
             }
         }
-        
+
         // Consume ')'
         self.consume_token(&TokenKind::RightParen, "Expected ')'")?;
-        
+
         let end_span = self.current_span();
         let span = start_span.merge(&end_span);
-        
+
         let ast_value = AstValue::FunctionCall {
             name: "env".to_string(),
             args,
         };
-        
+
         Ok(AstNode::new(ast_value, span))
     }
 
     /// Parse native type like @size(\"10MB\")
     fn parse_native_type(&mut self) -> Result<AstNode> {
         let start_span = self.current_span();
-        
+
         // Consume '@'
         self.consume_token(&TokenKind::At, "Expected '@'")?;
-        
+
         // Parse type name
         let type_name = if let TokenKind::Identifier(name) = &self.advance()?.kind {
             name.to_string()
@@ -598,18 +616,18 @@ impl<'a> NomlParser<'a> {
                 self.current_column(),
             ));
         };
-        
+
         // Consume '('
         self.consume_token(&TokenKind::LeftParen, "Expected '('")?;
-        
+
         let mut args = Vec::new();
-        
+
         // Parse arguments
         if !self.check_token(&TokenKind::RightParen) {
             loop {
                 let arg = self.parse_value()?;
                 args.push(arg);
-                
+
                 if self.match_token(&TokenKind::Comma) {
                     self.skip_whitespace();
                     if self.check_token(&TokenKind::RightParen) {
@@ -620,58 +638,92 @@ impl<'a> NomlParser<'a> {
                 }
             }
         }
-        
+
         // Consume ')'
         self.consume_token(&TokenKind::RightParen, "Expected ')'")?;
-        
+
         let end_span = self.current_span();
         let span = start_span.merge(&end_span);
-        
-        let ast_value = AstValue::Native {
-            type_name,
-            args,
-        };
-        
+
+        let ast_value = AstValue::Native { type_name, args };
+
         Ok(AstNode::new(ast_value, span))
     }
 
     /// Parse interpolation ${path}
     fn parse_interpolation(&mut self) -> Result<AstNode> {
         let start_span = self.current_span();
-        
+
         // Consume '${'
         self.consume_token(&TokenKind::InterpolationStart, "Expected '${'")?;
-        
-        // Parse the path - for now, we'll parse it as a simple identifier
-        // TODO: Implement proper path parsing
-        let path = if let TokenKind::Identifier(name) = &self.advance()?.kind {
-            name.to_string()
+
+        // Parse the path - support dot-separated paths and array indices
+        let mut path_segments = Vec::new();
+
+        // First segment must be an identifier
+        if let TokenKind::Identifier(name) = &self.advance()?.kind {
+            path_segments.push(name.to_string());
         } else {
-            return Err(NomlError::parse(
-                "Expected path in interpolation",
+            return Err(NomlError::parse_with_suggestion(
+                "Expected identifier in interpolation path",
                 self.current_line(),
                 self.current_column(),
+                "Interpolation paths should start with a variable name (e.g., '${server.host}')",
             ));
-        };
-        
+        }
+
+        // Parse additional segments separated by dots
+        while self.pos < self.tokens.len() {
+            if let Ok(token) = self.peek() {
+                if token.kind == TokenKind::Dot {
+                    self.advance()?; // consume dot
+
+                    // Next token should be identifier or integer (for array access)
+                    let next_token = self.advance()?;
+                    match &next_token.kind {
+                        TokenKind::Identifier(name) => {
+                            path_segments.push(name.to_string());
+                        }
+                        TokenKind::Integer { value, .. } => {
+                            path_segments.push(value.to_string());
+                        }
+                        _ => {
+                            return Err(NomlError::parse(
+                                "Expected identifier or integer after '.' in path",
+                                self.current_line(),
+                                self.current_column(),
+                            ));
+                        }
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Join path segments with dots
+        let path = path_segments.join(".");
+
         // Consume '}'
         self.consume_token(&TokenKind::RightBrace, "Expected '}'")?;
-        
+
         let end_span = self.current_span();
         let span = start_span.merge(&end_span);
-        
+
         let ast_value = AstValue::Interpolation { path };
-        
+
         Ok(AstNode::new(ast_value, span))
     }
 
     /// Parse include statement
     fn parse_include(&mut self) -> Result<AstNode> {
         let start_span = self.current_span();
-        
+
         // Consume 'include'
         self.consume_token(&TokenKind::Include, "Expected 'include'")?;
-        
+
         // Parse the path string
         let path_node = self.parse_string_value()?;
         let path = if let AstValue::String { ref value, .. } = path_node.value {
@@ -683,12 +735,12 @@ impl<'a> NomlParser<'a> {
                 self.current_column(),
             ));
         };
-        
+
         let end_span = self.current_span();
         let span = start_span.merge(&end_span);
-        
+
         let ast_value = AstValue::Include { path };
-        
+
         Ok(AstNode::new(ast_value, span))
     }
 
@@ -696,15 +748,15 @@ impl<'a> NomlParser<'a> {
 
     /// Check if at end of tokens
     fn is_at_end(&self) -> bool {
-        self.pos >= self.tokens.len() || matches!(self.tokens.get(self.pos), Some(token) if matches!(token.kind, TokenKind::Eof))
+        self.pos >= self.tokens.len()
+            || matches!(self.tokens.get(self.pos), Some(token) if matches!(token.kind, TokenKind::Eof))
     }
 
     /// Peek at current token
     fn peek(&self) -> Result<&Token> {
-        self.tokens.get(self.pos).ok_or_else(|| NomlError::parse(
-            "Unexpected end of input",
-            1, 1
-        ))
+        self.tokens
+            .get(self.pos)
+            .ok_or_else(|| NomlError::parse("Unexpected end of input", 1, 1))
     }
 
     /// Advance to next token
@@ -818,12 +870,12 @@ impl<'a> NomlParser<'a> {
 
     /// Get current line number
     fn current_line(&self) -> usize {
-if let Ok(token) = self.peek() {
-    token.span.start_line
-} else {
-    // Calculate line from source
-    self.source.matches('\n').count() + 1
-}
+        if let Ok(token) = self.peek() {
+            token.span.start_line
+        } else {
+            // Calculate line from source
+            self.source.matches('\n').count() + 1
+        }
     }
 
     /// Get current column number
@@ -860,7 +912,7 @@ if let Ok(token) = self.peek() {
     fn parse_inline_comment(&mut self) -> Result<Option<Comment>> {
         // Skip whitespace first
         self.skip_whitespace();
-        
+
         if let Ok(token) = self.peek() {
             if let TokenKind::Comment { text } = &token.kind {
                 let comment = Comment {
@@ -872,7 +924,7 @@ if let Ok(token) = self.peek() {
                 return Ok(Some(comment));
             }
         }
-        
+
         Ok(None)
     }
 }
@@ -953,12 +1005,38 @@ max = 20
         let doc = parse_string(source, None).unwrap();
         let value = doc.to_value().unwrap();
 
-        assert_eq!(value.get("database.host").unwrap().as_string().unwrap(), "localhost");
-        assert_eq!(value.get("database.port").unwrap().as_integer().unwrap(), 5432);
-        assert_eq!(value.get("server.host").unwrap().as_string().unwrap(), "0.0.0.0");
-        assert_eq!(value.get("server.port").unwrap().as_integer().unwrap(), 8080);
-        assert_eq!(value.get("database.pool.min").unwrap().as_integer().unwrap(), 5);
-        assert_eq!(value.get("database.pool.max").unwrap().as_integer().unwrap(), 20);
+        assert_eq!(
+            value.get("database.host").unwrap().as_string().unwrap(),
+            "localhost"
+        );
+        assert_eq!(
+            value.get("database.port").unwrap().as_integer().unwrap(),
+            5432
+        );
+        assert_eq!(
+            value.get("server.host").unwrap().as_string().unwrap(),
+            "0.0.0.0"
+        );
+        assert_eq!(
+            value.get("server.port").unwrap().as_integer().unwrap(),
+            8080
+        );
+        assert_eq!(
+            value
+                .get("database.pool.min")
+                .unwrap()
+                .as_integer()
+                .unwrap(),
+            5
+        );
+        assert_eq!(
+            value
+                .get("database.pool.max")
+                .unwrap()
+                .as_integer()
+                .unwrap(),
+            20
+        );
     }
 
     #[test]
@@ -993,9 +1071,13 @@ key = "value"
         let comments = doc.all_comments();
 
         assert!(!comments.is_empty());
-        assert!(comments.iter().any(|c| c.text.contains("This is a comment")));
+        assert!(comments
+            .iter()
+            .any(|c| c.text.contains("This is a comment")));
         assert!(comments.iter().any(|c| c.text.contains("Inline comment")));
         assert!(comments.iter().any(|c| c.text.contains("Another comment")));
-        assert!(comments.iter().any(|c| c.text.contains("Comment in section")));
+        assert!(comments
+            .iter()
+            .any(|c| c.text.contains("Comment in section")));
     }
 }
