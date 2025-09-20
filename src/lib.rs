@@ -111,7 +111,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! noml = { version = "0.4", features = ["async"] }
+//! noml = { version = "0.9", features = ["async"] }
 //! ```
 //!
 //! ```rust,ignore
@@ -175,7 +175,7 @@
 //!
 //! let mut resolver = Resolver::with_config(config);
 //! let document = parse_string(r#"name = env("APP_NAME")"#, None)?;
-//! let value = resolver.resolve(document)?;
+//! let value = resolver.resolve(&document)?;
 //!
 //! assert_eq!(value.get("name").unwrap().as_string().unwrap(), "my-app");
 //!
@@ -284,7 +284,7 @@ use std::path::Path;
 pub fn parse(source: &str) -> Result<Value> {
     let document = parse_string(source, None)?;
     let mut resolver = Resolver::new();
-    resolver.resolve(document)
+    resolver.resolve(&document)
 }
 
 /// Parse NOML from a file and resolve all dynamic features
@@ -353,7 +353,7 @@ pub fn parse_from_file<P: AsRef<Path>>(path: P) -> Result<Value> {
         .to_path_buf();
 
     let mut resolver = Resolver::new().with_base_path(base_path);
-    resolver.resolve(document)
+    resolver.resolve(&document)
 }
 
 /// Parse NOML from a string without resolving dynamic features
