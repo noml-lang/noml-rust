@@ -1,7 +1,7 @@
-# ┌───¸ ┌──┐┌────────┐┌──────────┐┌──┐     
-# │    ╲│  ││   ┌┐   ││          ││  │     
-# │  ╷  ╲  ││   ││   ││  ┌┐  ┌┐  ││  │      
-# │  │╲    ││   ││   ││  ││  ││  ││  │      
+# ┌───¸ ┌──┐┌────────┐┌──────────┐┌──┐
+# │    ╲│  ││   ┌┐   ││          ││  │
+# │  ╷  ╲  ││   ││   ││  ┌┐  ┌┐  ││  │
+# │  │╲    ││   ││   ││  ││  ││  ││  │ 
 # │  │ ╲   ││   └┘   ││  ││  ││  ││  └────┐
 # └──┘  `──┘└────────┘└──┘└──┘└──┘└───────┘
 # ▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
@@ -10,23 +10,29 @@
 # ╚════════════════════════════════════════╝
 # ▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
 
-
 # NOML: Rust Implementation
 # ▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
 [package]#▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░▒
 name = "noml"
-version = "0.4.0"
-publish = true
-license = "Apache-2.0"
-readme  = "README.md"
-rust-version = "1.82"
-edition = "2021"
+version = "0.9.0"
 
+# RUST VERSION
+# ═════════════════════════════════════════⬡
+edition = "2021"
+rust-version = "1.82"
+
+# LICENSE AND PUBLISHING
+# ═════════════════════════════════════════⬡
+license = "Apache-2.0"
+publish = true
+
+# PACKAGE METADATA
+# ═════════════════════════════════════════⬡
+readme  = "README.md"
 
 # DESCRIPTION
 # ═════════════════════════════════════════⬡
-description = "A blazing-fast configuration library for NOML (Nested Object Markup Language) with advanced features including variable interpolation, imports, schema validation, and comment preservation"
-
+description = "High-performance dynamic configuration language with format preservation, environment variables, native types, string interpolation, and TOML compatibility. Blazing-fast parsing at 25µs with zero-copy architecture."
 
 # LINK (At least 1)
 # ═════════════════════════════════════════⬡
@@ -38,11 +44,14 @@ documentation = "https://docs.rs/noml"                   # Documentation
 # KEYWORDS (MIN 5, MAX 10)
 #══════════════════════════════════════════⬡
 keywords = [
-    "noml", 
     "config", 
     "parser", 
-    "markup",
     "toml",
+    "markup",
+    "dynamic",
+    "performance",
+    "zero-copy",
+    "environment",
 ]
 
 # CATEGORIES (Max 5)
@@ -51,7 +60,8 @@ categories = [
     "config",
     "parsing", 
     "data-structures",
-    "development-tools"
+    "development-tools",
+    "template-engine"
 ]
 
 # EXCLUDE (Excludes from crates.io)
@@ -158,6 +168,7 @@ tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 # Benchmarking
 #══════════════════════════════════════════⬡
 criterion = { version = "0.5", features = ["html_reports"] }
+toml = "0.9.7"
 #░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
 
 
