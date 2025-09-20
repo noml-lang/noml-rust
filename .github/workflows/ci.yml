@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable, 1.70.0]  # Current MSRV
+        rust: [stable, 1.82.0]  # Current MSRV
     steps:
       - name: Checkout
         uses: actions/checkout@v4
