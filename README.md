@@ -113,14 +113,14 @@ To use `noml` in your project, add it as a dependency in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-noml = "0.3.0"
+noml = "0.4.0"
 ```
 
 You can also enable the `chrono` feature for date/time support and the `async` feature for async operations:
 
 ```toml
 [dependencies]
-noml = { version = "0.3.0", features = ["chrono", "async"] }
+noml = { version = "0.4.0", features = ["chrono", "async"] }
 ```
 
 -----
@@ -220,7 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-noml = { version = "0.3.0", features = ["async"] }
+noml = { version = "0.4.0", features = ["async"] }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -357,7 +357,7 @@ assert_eq!(updated_config.get("database.port").unwrap().as_integer()?, 5432);
 
 ```toml
 [dependencies]
-noml = { version = "0.3.0", features = ["async"] }
+noml = { version = "0.4.0", features = ["async"] }
 tokio = { version = "1.0", features = ["full"] }
 ```
 

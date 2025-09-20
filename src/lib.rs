@@ -111,7 +111,7 @@
 //! 
 //! ```toml
 //! [dependencies]
-//! noml = { version = "0.3", features = ["async"] }
+//! noml = { version = "0.4", features = ["async"] }
 //! ```
 //! 
 //! ```rust,ignore

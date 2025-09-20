@@ -25,7 +25,7 @@
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-noml = "0.3.0"
+noml = "0.4.0"
 ```
 
 <br>

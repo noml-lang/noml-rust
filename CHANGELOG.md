@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+
+
+
+
+<br>
+
+
+
+<!-- 0.4.0 - Major refactor
+============================================ -->
+## [0.4.0] - 2025-09-19
+
 ### Added
 - **HTTP Includes Support**: Added `include "https://..."` for remote configuration loading with async resolver
 - **Extended Native Types**: Added `@ip()`, `@semver()`, `@base64()`, and `@uuid()` native type converters
@@ -94,6 +106,8 @@
 
 
 
+
+
 <br>
 
 
@@ -113,6 +127,6 @@
 
 <!-- FOOTER
 ###################################################-->
-[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.3.0...HEAD
+[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/noml-lang/noml-rust/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/noml-lang/noml-rust/compare/v0.3.0...HEAD
