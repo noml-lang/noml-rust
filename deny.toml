@@ -6,25 +6,19 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 ignore = []
 
 [licenses]
-# List of explicitly allowed licenses
+# List of allowed licenses
 allow = [
     "MIT",
     "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
+    "Apache-2.0 WITH LLVM-exception", 
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "Unicode-DFS-2016",
 ]
-# List of explicitly disallowed licenses  
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-1.0",
-    "AGPL-3.0",
-]
-copyleft = "warn"
 confidence-threshold = 0.8
+
+[bans]
 
 [bans]
 multiple-versions = "warn"
