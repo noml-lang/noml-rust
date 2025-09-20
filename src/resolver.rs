@@ -226,7 +226,7 @@ impl Resolver {
     }
 
     /// Resolve a document, processing all includes, interpolations, and function calls
-    pub fn resolve(&mut self, document: Document) -> Result<Value> {
+    pub fn resolve(&mut self, document: &Document) -> Result<Value> {
         // Start with an empty variable context
         self.variables.clear();
         self.include_stack.clear();
@@ -251,10 +251,10 @@ impl Resolver {
                 Ok(AstNode::new(
                     AstValue::String {
                         value: resolved_value,
-                        style: style.clone(),
+                        style: *style, // Copy instead of clone for simple enums
                         has_escapes: *has_escapes,
                     },
-                    node.span.clone(),
+                    node.span, // Copy instead of clone now that Span is Copy
                 ))
             }
 
@@ -273,7 +273,7 @@ impl Resolver {
                         multiline: *multiline,
                         trailing_comma: *trailing_comma,
                     },
-                    node.span.clone(),
+                    node.span,
                 ))
             }
 
@@ -292,7 +292,7 @@ impl Resolver {
                         entries: resolved_entries,
                         inline: *inline,
                     },
-                    node.span.clone(),
+                    node.span,
                 ))
             }
 
@@ -311,7 +311,7 @@ impl Resolver {
 
             AstValue::Interpolation { path } => {
                 let value = self.resolve_variable_path(path)?;
-                Ok(AstNode::new(value, node.span.clone()))
+                Ok(AstNode::new(value, node.span))
             }
 
             AstValue::Include { path } => self.resolve_include(path, &node.span),
@@ -371,7 +371,7 @@ impl Resolver {
         };
 
         // Convert back to AST node
-        Ok(self.value_to_ast_node(result_value, span.clone()))
+        Ok(self.value_to_ast_node(result_value, *span))
     }
 
     fn resolve_native_type(
@@ -401,7 +401,7 @@ impl Resolver {
             args: args.to_vec(),
         };
 
-        Ok(AstNode::new(native_value, span.clone()))
+        Ok(AstNode::new(native_value, *span))
     }
 
     // The resolve_variable_path implementation was moved below to provide an enhanced
@@ -445,7 +445,7 @@ impl Resolver {
     }
 
     /// Enhanced resolve method that builds variable context
-    pub fn resolve_with_context(&mut self, document: Document) -> Result<Value> {
+    pub fn resolve_with_context(&mut self, document: &Document) -> Result<Value> {
         // Start with an empty variable context
         self.variables.clear();
         self.include_stack.clear();
@@ -742,7 +742,7 @@ impl Resolver {
             Value::Array(arr) => {
                 let elements = arr
                     .into_iter()
-                    .map(|v| self.value_to_ast_node(v, span.clone()))
+                    .map(|v| self.value_to_ast_node(v, span))
                     .collect();
                 AstValue::Array {
                     elements,
@@ -754,8 +754,8 @@ impl Resolver {
                 let entries = table
                     .into_iter()
                     .map(|(k, v)| TableEntry {
-                        key: Key::simple(k, span.clone()),
-                        value: self.value_to_ast_node(v, span.clone()),
+                        key: Key::simple(k, span),
+                        value: self.value_to_ast_node(v, span),
                         comments: Comments::new(),
                     })
                     .collect();
@@ -772,7 +772,7 @@ impl Resolver {
                         style: StringStyle::Double,
                         has_escapes: false,
                     },
-                    span.clone(),
+                    span,
                 );
                 AstValue::Native {
                     type_name: "binary".to_string(),
@@ -787,7 +787,7 @@ impl Resolver {
                         style: StringStyle::Double,
                         has_escapes: false,
                     },
-                    span.clone(),
+                    span,
                 );
                 AstValue::Native {
                     type_name: "size".to_string(),
@@ -802,7 +802,7 @@ impl Resolver {
                         style: StringStyle::Double,
                         has_escapes: false,
                     },
-                    span.clone(),
+                    span,
                 );
                 AstValue::Native {
                     type_name: "duration".to_string(),
@@ -818,7 +818,7 @@ impl Resolver {
                         style: StringStyle::Double,
                         has_escapes: false,
                     },
-                    span.clone(),
+                    span,
                 );
                 AstValue::Native {
                     type_name: "date".to_string(),
@@ -837,7 +837,7 @@ impl Resolver {
         let resolved_doc = self.resolve_http_includes_simple(document).await?;
 
         // Then use the regular sync resolver on the complete AST
-        self.resolve(resolved_doc)
+        self.resolve(&resolved_doc)
     }
 
     /// Simple non-recursive HTTP include resolution (does not support nested HTTP includes)
@@ -900,7 +900,7 @@ impl Resolver {
         node: &AstNode,
         content_map: &HashMap<String, String>,
     ) -> Result<AstNode> {
-        let span = node.span.clone();
+        let span = node.span;
         let comments = node.comments.clone();
 
         let ast_value = match &node.value {
