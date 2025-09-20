@@ -381,7 +381,7 @@ connection_string = "postgresql://db-server:5432/mydb"
     resolver.set_variable("port".to_string(), Value::Integer(5432));
 
     let config = resolver
-        .resolve_with_context(document)
+        .resolve_with_context(&document)
         .expect("Should resolve successfully");
 
     // Test basic interpolation
@@ -784,7 +784,7 @@ missing_var = env("MISSING_VAR")
 "#;
 
     let document = parse_raw(source).expect("Should parse");
-    let result = resolver.resolve(document).expect("Should resolve");
+    let result = resolver.resolve(&document).expect("Should resolve");
 
     assert_eq!(
         result.get("test_var").unwrap().as_string().unwrap(),
