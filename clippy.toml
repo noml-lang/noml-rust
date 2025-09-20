@@ -17,4 +17,4 @@ literal-representation-threshold = 65536
 
 # Allow certain patterns that are common in parsers/config libraries
 avoid-breaking-exported-api = true
-msrv = "1.70.0"  # Update to your MSRV
+msrv = "1.82.0"  # Update to your MSRV
