@@ -1,5 +1,5 @@
 //! # Error Handling
-//! 
+//!
 //! Comprehensive error system for NOML parsing, validation, and manipulation.
 //! Designed for clarity, debuggability, and extensibility.
 
@@ -10,7 +10,7 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, NomlError>;
 
 /// Comprehensive error types for all NOML operations.
-/// 
+///
 /// This error system is designed to provide maximum clarity about what went wrong,
 /// where it happened, and how to fix it. Each variant includes enough context
 /// for both developers and end users to understand and resolve issues.
@@ -23,7 +23,7 @@ pub enum NomlError {
         message: String,
         /// Line number where error occurred (1-indexed)
         line: usize,
-        /// Column number where error occurred (1-indexed) 
+        /// Column number where error occurred (1-indexed)
         column: usize,
         /// Optional source code snippet showing the error
         snippet: Option<String>,
@@ -178,10 +178,7 @@ impl NomlError {
     }
 
     /// Create a key not found error with suggestions
-    pub fn key_not_found_with_suggestions(
-        key: impl Into<String>,
-        available: Vec<String>,
-    ) -> Self {
+    pub fn key_not_found_with_suggestions(key: impl Into<String>, available: Vec<String>) -> Self {
         Self::KeyNotFound {
             key: key.into(),
             available,
@@ -259,6 +256,92 @@ impl NomlError {
         }
     }
 
+    /// Create an enhanced parse error with suggestions for common mistakes
+    pub fn parse_with_suggestion(
+        message: impl Into<String>,
+        line: usize,
+        column: usize,
+        suggestion: impl Into<String>,
+    ) -> Self {
+        let message = message.into();
+        let suggestion = suggestion.into();
+        Self::Parse {
+            message: format!("{message}. {suggestion}"),
+            line,
+            column,
+            snippet: None,
+        }
+    }
+
+    /// Create a parse error for unexpected tokens with suggestions
+    pub fn unexpected_token(
+        found: impl Into<String>,
+        expected: impl Into<String>,
+        line: usize,
+        column: usize,
+    ) -> Self {
+        let found = found.into();
+        let expected = expected.into();
+        Self::Parse {
+            message: format!("Expected {expected}, but found {found}"),
+            line,
+            column,
+            snippet: None,
+        }
+    }
+
+    /// Create a more helpful unknown function error
+    pub fn unknown_function(name: impl Into<String>, line: usize, column: usize) -> Self {
+        let name = name.into();
+        let suggestion = match name.as_str() {
+            "ENV" | "Env" => "Did you mean 'env()'?",
+            "include" | "INCLUDE" => "Did you mean 'include \"filename\"'?",
+            "size" | "SIZE" => "Did you mean '@size()'?",
+            "duration" | "DURATION" => "Did you mean '@duration()'?",
+            "date" | "DATE" => "Did you mean '@date()'?",
+            _ => "Available functions: env(), @size(), @duration(), @date()",
+        };
+
+        Self::Parse {
+            message: format!("Unknown function '{name}'. {suggestion}"),
+            line,
+            column,
+            snippet: None,
+        }
+    }
+
+    /// Create a more helpful unknown native type error
+    pub fn unknown_native_type(type_name: impl Into<String>, line: usize, column: usize) -> Self {
+        let type_name = type_name.into();
+        let suggestion = match type_name.as_str() {
+            "Size" | "SIZE" => "Did you mean '@size()'?",
+            "Duration" | "DURATION" => "Did you mean '@duration()'?",
+            "Date" | "DATE" => "Did you mean '@date()'?",
+            "url" | "URL" => "Did you mean '@url()'?",
+            _ => "Available native types: @size(), @duration(), @date(), @url()",
+        };
+
+        Self::Parse {
+            message: format!("Unknown native type '@{type_name}'. {suggestion}"),
+            line,
+            column,
+            snippet: None,
+        }
+    }
+
+    /// Create an error for malformed key paths with suggestions
+    pub fn malformed_key_path(path: impl Into<String>, line: usize, column: usize) -> Self {
+        let path = path.into();
+        Self::Parse {
+            message: format!(
+                "Malformed key path '{path}'. Keys should be identifiers separated by dots (e.g., 'server.host' or 'database.port')"
+            ),
+            line,
+            column,
+            snippet: None,
+        }
+    }
+
     /// Check if this error is recoverable
     pub fn is_recoverable(&self) -> bool {
         match self {
@@ -311,7 +394,12 @@ impl NomlError {
     /// Get a user-friendly error message with suggestions
     pub fn user_message(&self) -> String {
         match self {
-            NomlError::Parse { message, line, column, snippet } => {
+            NomlError::Parse {
+                message,
+                line,
+                column,
+                snippet,
+            } => {
                 let mut msg = format!("Syntax error on line {line}, column {column}: {message}");
                 if let Some(snippet) = snippet {
                     msg.push_str(&format!("\n\n{snippet}"));
@@ -358,7 +446,10 @@ mod tests {
     #[test]
     fn error_creation_and_display() {
         let err = NomlError::parse("Invalid syntax", 10, 5);
-        assert_eq!(err.to_string(), "Parse error at line 10, column 5: Invalid syntax");
+        assert_eq!(
+            err.to_string(),
+            "Parse error at line 10, column 5: Invalid syntax"
+        );
     }
 
     #[test]
