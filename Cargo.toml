@@ -41,7 +41,7 @@ repository    = "https://github.com/noml-lang/noml-rust" # Repository
 documentation = "https://docs.rs/noml"                   # Documentation
 
 
-# KEYWORDS (MIN 5, MAX 10)
+# KEYWORDS (MAX 5)
 #══════════════════════════════════════════⬡
 keywords = [
     "config", 
@@ -49,9 +49,6 @@ keywords = [
     "toml",
     "markup",
     "dynamic",
-    "performance",
-    "zero-copy",
-    "environment",
 ]
 
 # CATEGORIES (Max 5)
