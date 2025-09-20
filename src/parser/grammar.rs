@@ -185,9 +185,8 @@ impl<'a> NomlParser<'a> {
         // For array of tables, we need special handling to create arrays
         if is_array_of_tables {
             // Check if we already have an entry with this key
-            if let Some(existing_entry) = entries
-                .iter_mut()
-                .find(|e| e.key == key) // Direct comparison using custom PartialEq
+            if let Some(existing_entry) = entries.iter_mut().find(|e| e.key == key)
+            // Direct comparison using custom PartialEq
             {
                 // Convert existing table to array of tables or add to existing array
                 match &mut existing_entry.value.value {
@@ -203,8 +202,8 @@ impl<'a> NomlParser<'a> {
                             multiline: true,
                             trailing_comma: false,
                         };
-                        existing_entry.value =
-                            AstNode::new(array_value, existing_entry.value.span); // Copy instead of clone
+                        existing_entry.value = AstNode::new(array_value, existing_entry.value.span);
+                        // Copy instead of clone
                     }
                 }
             } else {

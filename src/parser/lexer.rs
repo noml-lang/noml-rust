@@ -552,7 +552,7 @@ impl<'a> Lexer<'a> {
         self.advance(); // Skip opening quote
 
         let content_start = self.pos;
-        
+
         // Find closing sequence: " followed by same number of #
         while !self.is_eof() {
             if self.current_char() == '"' {

@@ -59,9 +59,17 @@ enabled = false
     }
     let noml_time = start.elapsed();
 
-    println!("TOML: {:?} ({:.2}µs per parse)", toml_time, toml_time.as_micros() as f64 / iterations as f64);
-    println!("NOML: {:?} ({:.2}µs per parse)", noml_time, noml_time.as_micros() as f64 / iterations as f64);
-    
+    println!(
+        "TOML: {:?} ({:.2}µs per parse)",
+        toml_time,
+        toml_time.as_micros() as f64 / iterations as f64
+    );
+    println!(
+        "NOML: {:?} ({:.2}µs per parse)",
+        noml_time,
+        noml_time.as_micros() as f64 / iterations as f64
+    );
+
     let ratio = toml_time.as_micros() as f64 / noml_time.as_micros() as f64;
     if ratio > 1.0 {
         println!("NOML is {:.2}x FASTER than TOML!", ratio);

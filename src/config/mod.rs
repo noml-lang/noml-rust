@@ -271,8 +271,9 @@ impl Config {
         if !self.values.contains_key(key) {
             self.set(key, default.into())?;
         }
-        self.values.get(key)
-            .ok_or_else(|| NomlError::validation(format!("Failed to get key '{key}' after insertion")))
+        self.values.get(key).ok_or_else(|| {
+            NomlError::validation(format!("Failed to get key '{key}' after insertion"))
+        })
     }
 
     /// Set a value by key path
@@ -462,7 +463,10 @@ impl Config {
     }
 
     /// Helper method to merge tables directly without creating temporary Config objects
-    fn merge_tables(target: &mut BTreeMap<String, Value>, source: &BTreeMap<String, Value>) -> Result<()> {
+    fn merge_tables(
+        target: &mut BTreeMap<String, Value>,
+        source: &BTreeMap<String, Value>,
+    ) -> Result<()> {
         for (key, value) in source {
             if let Some(existing) = target.get_mut(key) {
                 if existing.is_table() && value.is_table() {

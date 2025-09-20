@@ -30,24 +30,24 @@ color = "gray"
 "#;
 
     println!("=== Testing TOML Compatibility ===");
-    
+
     match parse(toml_content) {
         Ok(parsed) => {
             println!("✅ NOML successfully parsed TOML content!");
-            
+
             // Test some accesses
             if let Ok(title) = parsed.get("title").unwrap().as_string() {
                 println!("Title: {title}");
             }
-            
+
             if let Ok(server) = parsed.get("database.server").unwrap().as_string() {
                 println!("Database server: {server}");
             }
-            
+
             if let Some(_products) = parsed.get("products") {
                 println!("Products array found!");
             }
-            
+
             println!("🎉 NOML can handle TOML files with format preservation!");
         }
         Err(e) => {

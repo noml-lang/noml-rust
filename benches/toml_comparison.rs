@@ -38,19 +38,19 @@ enabled = false
 "#;
 
     let mut group = c.benchmark_group("toml_vs_noml");
-    
+
     group.bench_function("toml_parse", |b| {
         b.iter(|| {
             let _: toml::Value = black_box(toml_content).parse().unwrap();
         })
     });
-    
+
     group.bench_function("noml_parse", |b| {
         b.iter(|| {
             let _ = noml::parse(black_box(toml_content)).unwrap();
         })
     });
-    
+
     group.finish();
 }
 

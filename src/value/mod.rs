@@ -293,14 +293,22 @@ impl Value {
             Value::Bool(b) => Ok(*b),
             Value::String(s) => {
                 // Case-insensitive comparison without allocation
-                if s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("yes") || s == "1" || s.eq_ignore_ascii_case("on") {
+                if s.eq_ignore_ascii_case("true")
+                    || s.eq_ignore_ascii_case("yes")
+                    || s == "1"
+                    || s.eq_ignore_ascii_case("on")
+                {
                     Ok(true)
-                } else if s.eq_ignore_ascii_case("false") || s.eq_ignore_ascii_case("no") || s == "0" || s.eq_ignore_ascii_case("off") {
+                } else if s.eq_ignore_ascii_case("false")
+                    || s.eq_ignore_ascii_case("no")
+                    || s == "0"
+                    || s.eq_ignore_ascii_case("off")
+                {
                     Ok(false)
                 } else {
                     Err(NomlError::type_error(s, "boolean", self.type_name()))
                 }
-            },
+            }
             Value::Integer(i) => Ok(*i != 0),
             _ => Err(NomlError::type_error(
                 format!("<{}>", self.type_name()),
@@ -469,8 +477,9 @@ impl Value {
                 table.insert(segment.to_string(), Value::empty_table());
             }
 
-            current = table.get_mut(*segment)
-                .ok_or_else(|| NomlError::validation(format!("Failed to access segment '{segment}'")))?;
+            current = table.get_mut(*segment).ok_or_else(|| {
+                NomlError::validation(format!("Failed to access segment '{segment}'"))
+            })?;
 
             // Ensure intermediate values are tables
             if !current.is_table() {
@@ -481,7 +490,8 @@ impl Value {
         }
 
         // Set the final value
-        let final_key = segments.last()
+        let final_key = segments
+            .last()
             .ok_or_else(|| NomlError::validation("Empty segments list"))?;
         let table = current.as_table_mut()?;
         table.insert(final_key.to_string(), value);
@@ -512,7 +522,8 @@ impl Value {
         }
 
         // Remove from parent
-        let final_key = segments.last()
+        let final_key = segments
+            .last()
             .ok_or_else(|| NomlError::validation("Empty segments list"))?;
         let table = current.as_table_mut()?;
         Ok(table.remove(*final_key))

@@ -67,9 +67,9 @@ enabled = false
 "#;
 
     println!("=== NOML Advanced Features Test ===");
-    
+
     let iterations = 1000;
-    
+
     // Test NOML with advanced features (TOML can't do this)
     let start = Instant::now();
     for _ in 0..iterations {
@@ -78,14 +78,14 @@ enabled = false
         // but we're measuring parsing performance, not resolution
     }
     let noml_advanced_time = start.elapsed();
-    
+
     // Test simple parsing comparison
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = toml::from_str::<toml::Value>(simple_toml).unwrap();
     }
     let toml_simple_time = start.elapsed();
-    
+
     let start = Instant::now();
     for _ in 0..iterations {
         let _ = noml::parse(simple_toml).unwrap();
@@ -93,13 +93,25 @@ enabled = false
     let noml_simple_time = start.elapsed();
 
     println!("Simple TOML content:");
-    println!("  TOML: {:.2}µs per parse", toml_simple_time.as_micros() as f64 / iterations as f64);
-    println!("  NOML: {:.2}µs per parse", noml_simple_time.as_micros() as f64 / iterations as f64);
-    println!("  Ratio: TOML is {:.2}x faster", noml_simple_time.as_micros() as f64 / toml_simple_time.as_micros() as f64);
-    
+    println!(
+        "  TOML: {:.2}µs per parse",
+        toml_simple_time.as_micros() as f64 / iterations as f64
+    );
+    println!(
+        "  NOML: {:.2}µs per parse",
+        noml_simple_time.as_micros() as f64 / iterations as f64
+    );
+    println!(
+        "  Ratio: TOML is {:.2}x faster",
+        noml_simple_time.as_micros() as f64 / toml_simple_time.as_micros() as f64
+    );
+
     println!("\nAdvanced NOML content (TOML cannot parse this):");
-    println!("  NOML: {:.2}µs per parse", noml_advanced_time.as_micros() as f64 / iterations as f64);
-    
+    println!(
+        "  NOML: {:.2}µs per parse",
+        noml_advanced_time.as_micros() as f64 / iterations as f64
+    );
+
     println!("\n=== Analysis ===");
     println!("NOML provides advanced features that TOML cannot:");
     println!("- Environment variable resolution: env(\"VAR\", \"default\")");
@@ -108,7 +120,11 @@ enabled = false
     println!("- String interpolation: \"/var/log/${{app_name}}.log\"");
     println!("- Full source fidelity preservation for tooling");
     println!("- Comment and formatting preservation");
-    
-    let overhead = (noml_simple_time.as_micros() as f64 / toml_simple_time.as_micros() as f64) - 1.0;
-    println!("\nNOML overhead for advanced capabilities: {:.1}%", overhead * 100.0);
+
+    let overhead =
+        (noml_simple_time.as_micros() as f64 / toml_simple_time.as_micros() as f64) - 1.0;
+    println!(
+        "\nNOML overhead for advanced capabilities: {:.1}%",
+        overhead * 100.0
+    );
 }

@@ -162,16 +162,21 @@ impl Serializer {
                 self.serialize_function_call(name, args)?;
             }
             AstValue::Interpolation { path } => {
-                write!(self.output, "${{{path}}}")
-                    .map_err(|e| crate::error::NomlError::validation(format!("Failed to write interpolation: {e}")))?;
+                write!(self.output, "${{{path}}}").map_err(|e| {
+                    crate::error::NomlError::validation(format!(
+                        "Failed to write interpolation: {e}"
+                    ))
+                })?;
             }
             AstValue::Include { path } => {
-                write!(self.output, "include \"{path}\"")
-                    .map_err(|e| crate::error::NomlError::validation(format!("Failed to write include: {e}")))?;
+                write!(self.output, "include \"{path}\"").map_err(|e| {
+                    crate::error::NomlError::validation(format!("Failed to write include: {e}"))
+                })?;
             }
             AstValue::Native { type_name, args } => {
-                write!(self.output, "@{type_name}(")
-                    .map_err(|e| crate::error::NomlError::validation(format!("Failed to write native type: {e}")))?;
+                write!(self.output, "@{type_name}(").map_err(|e| {
+                    crate::error::NomlError::validation(format!("Failed to write native type: {e}"))
+                })?;
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
                         self.output.push_str(", ");
@@ -332,8 +337,9 @@ impl Serializer {
 
     /// Serialize a function call
     fn serialize_function_call(&mut self, name: &str, args: &[AstNode]) -> Result<()> {
-        write!(self.output, "{name}(")
-            .map_err(|e| crate::error::NomlError::validation(format!("Failed to write function call: {e}")))?;
+        write!(self.output, "{name}(").map_err(|e| {
+            crate::error::NomlError::validation(format!("Failed to write function call: {e}"))
+        })?;
 
         for (i, arg) in args.iter().enumerate() {
             if i > 0 {
