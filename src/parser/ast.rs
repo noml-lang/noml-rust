@@ -34,7 +34,7 @@ pub struct AstNode {
 }
 
 /// Source location information
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     /// Starting byte offset in source
     pub start: usize,
@@ -296,7 +296,7 @@ pub struct TableEntry {
 }
 
 /// Key representation with format preservation
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Key {
     /// Key segments (for dotted keys like server.host)
     pub segments: Vec<KeySegment>,
@@ -316,7 +316,7 @@ pub struct KeySegment {
 }
 
 /// String quoting styles
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StringStyle {
     /// Double quotes "string"
     Double,
@@ -720,6 +720,15 @@ impl fmt::Display for Key {
     }
 }
 
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        // Only compare segments, not span (for semantic equality)
+        self.segments == other.segments
+    }
+}
+
+impl Eq for Key {}
+
 impl Comments {
     /// Create empty comments
     pub fn new() -> Self {
@@ -871,7 +880,7 @@ mod tests {
         let span = Span::new(0, 4, 1, 1, 1, 4);
 
         // Test simple values
-        let bool_node = AstNode::new(AstValue::Bool(true), span.clone());
+        let bool_node = AstNode::new(AstValue::Bool(true), span);
         assert_eq!(bool_node.to_value().unwrap(), Value::Bool(true));
 
         let int_node = AstNode::new(
@@ -879,7 +888,7 @@ mod tests {
                 value: 42,
                 raw: "42".to_string(),
             },
-            span.clone(),
+            span,
         );
         assert_eq!(int_node.to_value().unwrap(), Value::Integer(42));
 
