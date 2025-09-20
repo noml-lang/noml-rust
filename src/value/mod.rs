@@ -1,96 +1,96 @@
 //! # NOML Value System
-//! 
+//!
 //! Comprehensive value types and operations for NOML data representation.
 //! This module provides the core [`Value`] enum and all associated functionality
 //! for working with configuration data in a type-safe manner.
-//! 
+//!
 //! ## Value Types
-//! 
+//!
 //! NOML supports all standard configuration data types plus specialized types
 //! for common configuration patterns:
-//! 
+//!
 //! - **Primitives**: `null`, `bool`, `i64`, `f64`, `String`
 //! - **Collections**: `Array<Value>`, `Table<String, Value>`
 //! - **Native Types**: `Size`, `Duration`, `Binary`
 //! - **Optional**: `DateTime` (with `chrono` feature)
-//! 
+//!
 //! ## Type Conversions
-//! 
+//!
 //! The [`Value`] type provides safe conversions with comprehensive error handling:
-//! 
+//!
 //! ```rust
 //! use noml::Value;
-//! 
+//!
 //! let value = Value::string("42");
-//! 
+//!
 //! // Safe conversions with error handling
 //! let as_int = value.as_integer()?;  // Ok(42)
 //! let as_float = value.as_float()?;  // Ok(42.0)
 //! let as_bool = value.as_bool();     // Err(type mismatch)
-//! 
+//!
 //! # Ok::<(), noml::error::NomlError>(())
 //! ```
-//! 
+//!
 //! ## Smart String Conversions
-//! 
+//!
 //! String values support intelligent parsing for booleans and numbers:
-//! 
+//!
 //! ```rust
 //! use noml::Value;
-//! 
+//!
 //! // Boolean parsing
 //! assert_eq!(Value::string("true").as_bool()?, true);
 //! assert_eq!(Value::string("yes").as_bool()?, true);
 //! assert_eq!(Value::string("1").as_bool()?, true);
 //! assert_eq!(Value::string("false").as_bool()?, false);
-//! 
+//!
 //! // Numeric parsing
 //! assert_eq!(Value::string("123").as_integer()?, 123);
 //! assert_eq!(Value::string("3.14").as_float()?, 3.14);
-//! 
+//!
 //! # Ok::<(), noml::error::NomlError>(())
 //! ```
-//! 
+//!
 //! ## Native Type Support
-//! 
+//!
 //! NOML includes specialized types for common configuration values:
-//! 
+//!
 //! ```rust
 //! use noml::Value;
-//! 
+//!
 //! // File sizes with automatic parsing
 //! let size = Value::size(1024 * 1024);  // 1MB in bytes
-//! 
+//!
 //! // Time durations in seconds
 //! let timeout = Value::duration(30.0);  // 30 seconds
-//! 
+//!
 //! // Binary data
 //! let data = Value::Binary(vec![0x48, 0x65, 0x6c, 0x6c, 0x6f]);
 //! ```
-//! 
+//!
 //! ## Path-Based Access
-//! 
+//!
 //! Access nested values using dot-notation paths:
-//! 
+//!
 //! ```rust
 //! use noml::Value;
 //! use std::collections::BTreeMap;
-//! 
+//!
 //! let mut config = BTreeMap::new();
 //! let mut server = BTreeMap::new();
 //! server.insert("host".to_string(), Value::string("localhost"));
 //! server.insert("port".to_string(), Value::integer(8080));
 //! config.insert("server".to_string(), Value::table(server));
-//! 
+//!
 //! let root = Value::table(config);
-//! 
+//!
 //! // Access nested values
 //! let host = root.get("server.host").unwrap();
 //! let port = root.get("server.port").unwrap();
-//! 
+//!
 //! assert_eq!(host.as_string()?, "localhost");
 //! assert_eq!(port.as_integer()?, 8080);
-//! 
+//!
 //! # Ok::<(), noml::error::NomlError>(())
 //! ```
 
@@ -103,7 +103,7 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 
 /// A NOML value - the fundamental unit of data in NOML documents.
-/// 
+///
 /// Values are designed to be lightweight, cloneable, and convertible
 /// to/from Rust native types with zero-copy operations where possible.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -111,37 +111,37 @@ use chrono::{DateTime, Utc};
 pub enum Value {
     /// Null/empty value
     Null,
-    
+
     /// Boolean value (true/false)
     Bool(bool),
-    
+
     /// Integer value (64-bit signed)
     Integer(i64),
-    
+
     /// Floating-point value (64-bit)
     Float(f64),
-    
+
     /// String value (UTF-8)
     String(String),
-    
+
     /// Array of values
     Array(Vec<Value>),
-    
+
     /// Table/object with string keys
     Table(BTreeMap<String, Value>),
-    
+
     /// Native date/time value (optional feature)
     #[cfg(feature = "chrono")]
     #[serde(with = "chrono::serde::ts_seconds")]
     DateTime(DateTime<Utc>),
-    
+
     /// Raw binary data
     Binary(Vec<u8>),
-    
+
     /// Size value (bytes, with human-readable format)
     Size(u64),
-    
-    /// Duration value (seconds, with human-readable format) 
+
+    /// Duration value (seconds, with human-readable format)
     Duration(f64),
 }
 
@@ -245,42 +245,42 @@ impl Value {
     }
 
     /// Convert value to boolean with intelligent string parsing
-    /// 
+    ///
     /// Performs type conversion to boolean with support for common
     /// string representations. Non-zero integers are treated as true.
-    /// 
+    ///
     /// # String Parsing
-    /// 
+    ///
     /// The following string values are recognized (case-insensitive):
     /// - **True**: `"true"`, `"yes"`, `"1"`, `"on"`
     /// - **False**: `"false"`, `"no"`, `"0"`, `"off"`
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use noml::Value;
-    /// 
+    ///
     /// // Direct boolean values
     /// assert_eq!(Value::Bool(true).as_bool()?, true);
     /// assert_eq!(Value::Bool(false).as_bool()?, false);
-    /// 
+    ///
     /// // String parsing
     /// assert_eq!(Value::string("true").as_bool()?, true);
     /// assert_eq!(Value::string("YES").as_bool()?, true);
     /// assert_eq!(Value::string("1").as_bool()?, true);
     /// assert_eq!(Value::string("false").as_bool()?, false);
     /// assert_eq!(Value::string("no").as_bool()?, false);
-    /// 
+    ///
     /// // Integer conversion
     /// assert_eq!(Value::integer(1).as_bool()?, true);
     /// assert_eq!(Value::integer(0).as_bool()?, false);
     /// assert_eq!(Value::integer(-5).as_bool()?, true);
-    /// 
+    ///
     /// # Ok::<(), noml::error::NomlError>(())
     /// ```
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns [`NomlError`] for:
     /// - Unrecognized string values
     /// - Incompatible types (arrays, tables, etc.)
@@ -312,7 +312,8 @@ impl Value {
                     Err(NomlError::type_error(f.to_string(), "integer", "float"))
                 }
             }
-            Value::String(s) => s.parse::<i64>()
+            Value::String(s) => s
+                .parse::<i64>()
                 .map_err(|_| NomlError::type_error(s, "integer", "string")),
             Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
             _ => Err(NomlError::type_error(
@@ -328,7 +329,8 @@ impl Value {
         match self {
             Value::Float(f) => Ok(*f),
             Value::Integer(i) => Ok(*i as f64),
-            Value::String(s) => s.parse::<f64>()
+            Value::String(s) => s
+                .parse::<f64>()
                 .map_err(|_| NomlError::type_error(s, "float", "string")),
             _ => Err(NomlError::type_error(
                 self.to_string(),
@@ -407,14 +409,14 @@ impl Value {
     }
 
     /// Get a value by key path (dot-separated)
-    /// 
+    ///
     /// Examples:
     /// - `get("key")` - get direct key
     /// - `get("section.key")` - get nested key
     /// - `get("array.0")` - get array index
     pub fn get(&self, path: &str) -> Option<&Value> {
         let mut current = self;
-        
+
         for segment in path.split('.') {
             match current {
                 Value::Table(table) => {
@@ -427,7 +429,7 @@ impl Value {
                 _ => return None,
             }
         }
-        
+
         Some(current)
     }
 
@@ -445,18 +447,18 @@ impl Value {
         }
 
         let mut current = self;
-        
+
         // Navigate to the parent of the final key
         for segment in &segments[..segments.len() - 1] {
             let table = current.as_table_mut()?;
-            
+
             // Create intermediate table if it doesn't exist
             if !table.contains_key(*segment) {
                 table.insert(segment.to_string(), Value::empty_table());
             }
-            
+
             current = table.get_mut(*segment).unwrap();
-            
+
             // Ensure intermediate values are tables
             if !current.is_table() {
                 return Err(NomlError::validation(format!(
@@ -469,7 +471,7 @@ impl Value {
         let final_key = segments.last().unwrap();
         let table = current.as_table_mut()?;
         table.insert(final_key.to_string(), value);
-        
+
         Ok(())
     }
 
@@ -573,15 +575,15 @@ fn format_size(bytes: u64) -> String {
     if bytes == 0 {
         return "0B".to_string();
     }
-    
+
     let mut size = bytes as f64;
     let mut unit_index = 0;
-    
+
     while size >= 1024.0 && unit_index < UNITS.len() - 1 {
         size /= 1024.0;
         unit_index += 1;
     }
-    
+
     if unit_index == 0 {
         format!("{bytes}B")
     } else {
@@ -685,11 +687,15 @@ mod tests {
     #[test]
     fn nested_key_operations() {
         let mut value = Value::empty_table();
-        
+
         // Set nested values
-        value.set("server.host", Value::string("localhost")).unwrap();
+        value
+            .set("server.host", Value::string("localhost"))
+            .unwrap();
         value.set("server.port", Value::integer(8080)).unwrap();
-        value.set("database.url", Value::string("postgres://...")).unwrap();
+        value
+            .set("database.url", Value::string("postgres://..."))
+            .unwrap();
 
         // Get nested values
         assert_eq!(
@@ -735,10 +741,10 @@ mod tests {
 
     #[test]
     fn size_and_duration_formatting() {
-        let size_val = Value::size(1536);  // 1.5KB
+        let size_val = Value::size(1536); // 1.5KB
         assert_eq!(size_val.to_string(), "1.5KB");
 
-        let duration_val = Value::duration(90.0);  // 1.5 minutes
+        let duration_val = Value::duration(90.0); // 1.5 minutes
         assert_eq!(duration_val.to_string(), "1.5m");
     }
 
