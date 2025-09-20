@@ -1,11 +1,11 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use noml::{parse, parse_from_file, Config};
 use std::fs;
 use tempfile::NamedTempFile;
 
 fn bench_parsing(c: &mut Criterion) {
     let mut group = c.benchmark_group("parsing");
-    
+
     // Small config
     let small_config = r#"
 name = "test-app"
@@ -16,7 +16,7 @@ debug = true
 host = "localhost"
 port = 8080
 "#;
-    
+
     // Medium config with env vars and native types
     let medium_config = r#"
 # Application Configuration
@@ -215,33 +215,45 @@ health_check = "/health"
 "#;
 
     // Benchmark parsing different sizes
-    group.bench_with_input(BenchmarkId::new("small_config", "parse"), &small_config, |b, config| {
-        b.iter(|| {
-            let result = parse(black_box(config));
-            black_box(result.unwrap());
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("small_config", "parse"),
+        &small_config,
+        |b, config| {
+            b.iter(|| {
+                let result = parse(black_box(config));
+                black_box(result.unwrap());
+            });
+        },
+    );
 
-    group.bench_with_input(BenchmarkId::new("medium_config", "parse"), &medium_config, |b, config| {
-        b.iter(|| {
-            let result = parse(black_box(config));
-            black_box(result.unwrap());
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("medium_config", "parse"),
+        &medium_config,
+        |b, config| {
+            b.iter(|| {
+                let result = parse(black_box(config));
+                black_box(result.unwrap());
+            });
+        },
+    );
 
-    group.bench_with_input(BenchmarkId::new("large_config", "parse"), &large_config, |b, config| {
-        b.iter(|| {
-            let result = parse(black_box(config));
-            black_box(result.unwrap());
-        });
-    });
+    group.bench_with_input(
+        BenchmarkId::new("large_config", "parse"),
+        &large_config,
+        |b, config| {
+            b.iter(|| {
+                let result = parse(black_box(config));
+                black_box(result.unwrap());
+            });
+        },
+    );
 
     group.finish();
 }
 
 fn bench_file_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("file_operations");
-    
+
     let config_content = r#"
 app_name = "BenchmarkApp"
 version = "1.0.0"
@@ -278,7 +290,7 @@ max_size = @size("1GB")
 
 fn bench_config_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("config_operations");
-    
+
     let config_content = r#"
 app_name = "ConfigApp"
 version = "1.0.0"
@@ -316,7 +328,7 @@ port = 5432
 criterion_group!(
     benches,
     bench_parsing,
-    bench_file_operations, 
+    bench_file_operations,
     bench_config_operations
 );
 criterion_main!(benches);
