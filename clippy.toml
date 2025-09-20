@@ -1,0 +1,20 @@
+# Clippy configuration for NOML
+# https://doc.rust-lang.org/clippy/configuration.html
+
+# Performance
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250
+
+# Cognitive complexity
+cognitive-complexity-threshold = 30
+
+# Documentation
+missing-docs-in-crate-items = false
+
+# Style preferences
+enum-variant-name-threshold = 3
+literal-representation-threshold = 65536
+
+# Allow certain patterns that are common in parsers/config libraries
+avoid-breaking-exported-api = true
+msrv = "1.70.0"  # Update to your MSRV
