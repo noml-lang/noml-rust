@@ -773,7 +773,7 @@ impl fmt::Display for TokenKind<'_> {
 mod tests {
     use super::*;
 
-    fn tokenize_string(input: &str) -> Result<Vec<Token>> {
+    fn tokenize_string(input: &str) -> Result<Vec<Token<'_>>> {
         let mut lexer = Lexer::new(input);
         lexer.tokenize()
     }
