@@ -146,12 +146,16 @@ pub struct Lexer<'a> {
     input: &'a str,
     /// Current byte position
     pos: usize,
+    /// Current character position (for O(1) access)
+    char_pos: usize,
     /// Current line number (1-indexed)
     line: usize,
     /// Current column number (1-indexed)
     column: usize,
     /// Start position of current token
     token_start: usize,
+    /// Start character position of current token
+    token_start_char_pos: usize,
     /// Start line of current token
     token_start_line: usize,
     /// Start column of current token
@@ -164,9 +168,11 @@ impl<'a> Lexer<'a> {
         Self {
             input,
             pos: 0,
+            char_pos: 0,
             line: 1,
             column: 1,
             token_start: 0,
+            token_start_char_pos: 0,
             token_start_line: 1,
             token_start_column: 1,
         }
@@ -284,7 +290,7 @@ impl<'a> Lexer<'a> {
                         // Add InterpolationStart token for test compatibility
                         let interpolation_token = Token {
                             kind: TokenKind::InterpolationStart,
-                            span: token.span.clone(),
+                            span: token.span, // Now using Copy instead of clone
                             text: "${",
                         };
                         tokens.push(interpolation_token);
@@ -307,6 +313,7 @@ impl<'a> Lexer<'a> {
     /// Start tracking a new token
     fn start_token(&mut self) {
         self.token_start = self.pos;
+        self.token_start_char_pos = self.char_pos;
         self.token_start_line = self.line;
         self.token_start_column = self.column;
     }
@@ -328,24 +335,29 @@ impl<'a> Lexer<'a> {
     }
 
     /// Get the current character without advancing
+    #[inline]
     fn current_char(&self) -> char {
         self.input.chars().nth(self.char_pos()).unwrap_or('\0')
     }
 
     /// Peek at the next character without advancing
+    #[inline]
     fn peek_char(&self) -> Option<char> {
         self.input.chars().nth(self.char_pos() + 1)
     }
 
-    /// Get current character position (not byte position)
+    /// Get current character position (not byte position) - O(1) cached
+    #[inline]
     fn char_pos(&self) -> usize {
-        self.input[..self.pos].chars().count()
+        self.char_pos
     }
 
     /// Advance by one character
+    #[inline]
     fn advance(&mut self) -> Option<char> {
         if let Some(ch) = self.input[self.pos..].chars().next() {
             self.pos += ch.len_utf8();
+            self.char_pos += 1;
             if ch == '\n' {
                 self.line += 1;
                 self.column = 1;
@@ -359,6 +371,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Check if we're at end of file
+    #[inline]
     fn is_eof(&self) -> bool {
         self.pos >= self.input.len()
     }
@@ -380,17 +393,17 @@ impl<'a> Lexer<'a> {
     fn lex_comment(&mut self) -> Result<Token<'a>> {
         self.advance(); // Skip #
 
-        let mut text = String::new();
+        let start_pos = self.pos;
         while let Some(ch) = self.input[self.pos..].chars().next() {
             if ch == '\n' {
                 break;
             }
-            text.push(ch);
             self.advance();
         }
 
-        // Trim leading whitespace from comment
-        let text = text.trim_start().to_string();
+        // Use string slice and only allocate when trimming is needed
+        let comment_slice = &self.input[start_pos..self.pos];
+        let text = comment_slice.trim_start().to_string();
 
         Ok(self.make_token(TokenKind::Comment { text }))
     }
@@ -448,9 +461,8 @@ impl<'a> Lexer<'a> {
                         }
                         self.advance();
 
-                        let mut unicode_value = String::new();
+                        let start_pos = self.pos;
                         while !self.is_eof() && self.current_char() != '}' {
-                            unicode_value.push(self.current_char());
                             self.advance();
                         }
 
@@ -462,7 +474,8 @@ impl<'a> Lexer<'a> {
                             ));
                         }
 
-                        let code = u32::from_str_radix(&unicode_value, 16).map_err(|_| {
+                        let unicode_slice = &self.input[start_pos..self.pos];
+                        let code = u32::from_str_radix(unicode_slice, 16).map_err(|_| {
                             NomlError::parse("Invalid unicode escape value", self.line, self.column)
                         })?;
 
@@ -538,8 +551,8 @@ impl<'a> Lexer<'a> {
         }
         self.advance(); // Skip opening quote
 
-        let mut value = String::new();
-
+        let content_start = self.pos;
+        
         // Find closing sequence: " followed by same number of #
         while !self.is_eof() {
             if self.current_char() == '"' {
@@ -559,23 +572,28 @@ impl<'a> Lexer<'a> {
                 }
 
                 if hash_count == hashes {
-                    // Found closing sequence
+                    // Found closing sequence - extract content as slice
+                    let value = self.input[content_start..self.pos].to_string();
                     self.advance(); // Skip closing quote
                     for _ in 0..hashes {
                         self.advance(); // Skip hashes
                     }
-                    break;
+                    return Ok(self.make_token(TokenKind::String {
+                        value,
+                        style: StringStyle::Raw { hashes },
+                    }));
                 }
             }
 
-            value.push(self.current_char());
             self.advance();
         }
 
-        Ok(self.make_token(TokenKind::String {
-            value,
-            style: StringStyle::Raw { hashes },
-        }))
+        // If we reach here, the raw string was not properly closed
+        Err(NomlError::parse(
+            "Unterminated raw string",
+            self.line,
+            self.column,
+        ))
     }
 
     /// Lex a number (integer or float)
