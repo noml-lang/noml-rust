@@ -27,7 +27,8 @@
   - Removed redundant security and separate testing workflows
 - **Clippy Compliance**: Fixed lifetime syntax warnings in parser components (`src/parser/grammar.rs` and `src/parser/lexer.rs`) with explicit `Token<'_>` lifetime annotations
 - **Dependency Auditing**: Updated `deny.toml` to v2 format removing deprecated 'deny' and 'copyleft' keys for proper cargo-deny compatibility
-- **MSRV Compatibility**: Regenerated `Cargo.lock` with Rust 1.70.0 to ensure lockfile version 3 compatibility with minimum supported Rust version
+- **MSRV Update**: Updated minimum supported Rust version from 1.65 to 1.82.0 to support modern dependency ecosystem (ICU, HTTP clients, etc.)
+- **Cargo.lock Regeneration**: Regenerated `Cargo.lock` with latest compatible dependency versions for improved security and compatibility
 - **Local CI Script**: Enhanced `scripts/local-ci.sh` for comprehensive local validation matching GitHub Actions pipeline
 - **Security Integration**: Integrated security auditing directly into main CI workflow for streamlined dependency vulnerability checking
 
