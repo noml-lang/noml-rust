@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+### Added
+- **Revolutionary Format Preservation**: Industry-first complete format preservation system maintaining exact whitespace, comments, indentation, and style during parsing and serialization
+- **Format-Preserving API**: New `parse_preserving()`, `parse_preserving_from_file()`, `modify_preserving()`, and `save_preserving()` functions for zero-loss editing
+- **Enhanced AST with Metadata**: Extended AST nodes with comprehensive `FormatMetadata` including indentation tracking, line ending detection, and style preservation
+- **Format-Preserving Serializer**: Complete serialization system that reconstructs NOML files with perfect fidelity to original formatting
+- **noml_value! Macro**: Convenient macro for programmatic Value creation with support for all NOML types including nested structures
+- **Enhanced Error Messages**: Context-aware error reporting with helpful suggestions and better user experience
+- **String Escape Tracking**: Improved string parsing with proper escape sequence handling and preservation
+- **Enhanced Path Parsing**: Advanced dot-notation and array access path parsing with better error handling
+- **DateTime AST Conversion**: Full DateTime support with automatic conversion between AST and Value representations
+- **Comprehensive Documentation**: Complete API documentation with examples for all new features
+- **Production-Ready Testing**: 66+ unit tests plus comprehensive integration and documentation tests
+
+### Enhanced
+- **Zero-Copy Performance**: Optimized lexer and parser for maximum performance with full format preservation
+- **Error Context**: Enhanced error messages throughout parser and resolver with actionable suggestions
+- **Type System**: Improved Value type system with better conversion methods and format preservation
+- **API Consistency**: Standardized API patterns across all format-preserving operations
+
 
 
 
