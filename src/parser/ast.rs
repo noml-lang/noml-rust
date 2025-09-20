@@ -1,5 +1,5 @@
 //! # Abstract Syntax Tree
-//! 
+//!
 //! AST representation of parsed NOML documents with full fidelity preservation.
 //! This includes comments, formatting, and source location information for
 //! perfect round-trip serialization and error reporting.
@@ -20,7 +20,7 @@ pub struct Document {
     pub source_text: Option<String>,
 }
 
-/// An AST node with source location and metadata
+/// An AST node with source location and comprehensive metadata
 #[derive(Debug, Clone, PartialEq)]
 pub struct AstNode {
     /// The actual value
@@ -29,6 +29,8 @@ pub struct AstNode {
     pub span: Span,
     /// Comments associated with this node
     pub comments: Comments,
+    /// Formatting metadata for perfect round-trip serialization
+    pub format: FormatMetadata,
 }
 
 /// Source location information
@@ -40,7 +42,7 @@ pub struct Span {
     pub end: usize,
     /// Starting line number (1-indexed)
     pub start_line: usize,
-    /// Starting column number (1-indexed) 
+    /// Starting column number (1-indexed)
     pub start_column: usize,
     /// Ending line number (1-indexed)
     pub end_line: usize,
@@ -72,6 +74,114 @@ pub struct Comments {
     pub after: Vec<Comment>,
 }
 
+/// Comprehensive formatting metadata for perfect round-trip serialization
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FormatMetadata {
+    /// Whitespace before this node (includes newlines and indentation)
+    pub leading_whitespace: String,
+    /// Whitespace after this node
+    pub trailing_whitespace: String,
+    /// Indentation used for this node (tab vs spaces, amount)
+    pub indentation: Indentation,
+    /// Line ending style (CRLF vs LF)
+    pub line_ending: LineEnding,
+    /// Additional formatting-specific metadata
+    pub format_style: FormatStyle,
+}
+
+/// Indentation configuration
+#[derive(Debug, Clone, PartialEq)]
+pub struct Indentation {
+    /// Whether to use tabs or spaces
+    pub use_tabs: bool,
+    /// Number of spaces per indent level (or tab width)
+    pub size: usize,
+    /// Current indentation level
+    pub level: usize,
+}
+
+impl Default for Indentation {
+    fn default() -> Self {
+        Self {
+            use_tabs: false,
+            size: 2,
+            level: 0,
+        }
+    }
+}
+
+/// Line ending style
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum LineEnding {
+    /// Unix-style (LF)
+    #[default]
+    Unix,
+    /// Windows-style (CRLF)
+    Windows,
+    /// Classic Mac (CR) - rarely used
+    Mac,
+}
+
+/// Format-specific styling information
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum FormatStyle {
+    /// Default formatting
+    #[default]
+    Default,
+    /// Array-specific formatting
+    Array {
+        /// Whether array is on multiple lines
+        multiline: bool,
+        /// Whether there's a trailing comma
+        trailing_comma: bool,
+        /// Spacing around brackets
+        bracket_spacing: BracketSpacing,
+    },
+    /// Table-specific formatting  
+    Table {
+        /// Whether table uses inline format { key = value }
+        inline: bool,
+        /// Spacing around equals signs
+        equals_spacing: EqualsSpacing,
+        /// Whether keys are quoted
+        quoted_keys: bool,
+    },
+    /// Key-value pair formatting
+    KeyValue {
+        /// Spacing around the equals sign
+        equals_spacing: EqualsSpacing,
+        /// Whether key is quoted
+        quoted_key: bool,
+    },
+}
+
+/// Spacing configuration around brackets
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BracketSpacing {
+    /// Space after opening bracket
+    pub after_open: String,
+    /// Space before closing bracket  
+    pub before_close: String,
+}
+
+/// Spacing configuration around equals signs
+#[derive(Debug, Clone, PartialEq)]
+pub struct EqualsSpacing {
+    /// Space before equals sign
+    pub before: String,
+    /// Space after equals sign
+    pub after: String,
+}
+
+impl Default for EqualsSpacing {
+    fn default() -> Self {
+        Self {
+            before: " ".to_string(),
+            after: " ".to_string(),
+        }
+    }
+}
+
 /// A single comment with location
 #[derive(Debug, Clone, PartialEq)]
 pub struct Comment {
@@ -97,10 +207,10 @@ pub enum CommentStyle {
 pub enum AstValue {
     /// Null value
     Null,
-    
+
     /// Boolean value
     Bool(bool),
-    
+
     /// Integer value with original text representation
     Integer {
         /// The integer value
@@ -108,7 +218,7 @@ pub enum AstValue {
         /// Original text (for preserving formatting like 0x123, 0o777)
         raw: String,
     },
-    
+
     /// Float value with original text representation
     Float {
         /// The float value
@@ -116,7 +226,7 @@ pub enum AstValue {
         /// Original text (for preserving precision and format)
         raw: String,
     },
-    
+
     /// String value with quote style preservation
     String {
         /// The string value
@@ -126,7 +236,7 @@ pub enum AstValue {
         /// Whether this string contained escape sequences
         has_escapes: bool,
     },
-    
+
     /// Array with formatting preservation
     Array {
         /// Elements of the array
@@ -136,7 +246,7 @@ pub enum AstValue {
         /// Trailing comma
         trailing_comma: bool,
     },
-    
+
     /// Table with key ordering and formatting preservation
     Table {
         /// Ordered key-value pairs
@@ -144,7 +254,7 @@ pub enum AstValue {
         /// Whether table uses inline format { key = value }
         inline: bool,
     },
-    
+
     /// Function call (for env(), size(), etc.)
     FunctionCall {
         /// Function name
@@ -152,19 +262,19 @@ pub enum AstValue {
         /// Arguments
         args: Vec<AstNode>,
     },
-    
+
     /// Variable interpolation ${path}
     Interpolation {
         /// The path to interpolate
         path: String,
     },
-    
+
     /// Include/import statement
     Include {
         /// Path to include
         path: String,
     },
-    
+
     /// Native type constructor @type(...)
     Native {
         /// Type name (date, size, duration, etc.)
@@ -274,6 +384,7 @@ impl AstNode {
             value,
             span,
             comments: Comments::default(),
+            format: FormatMetadata::default(),
         }
     }
 
@@ -283,6 +394,22 @@ impl AstNode {
             value,
             span,
             comments,
+            format: FormatMetadata::default(),
+        }
+    }
+
+    /// Create an AST node with full metadata
+    pub fn with_metadata(
+        value: AstValue,
+        span: Span,
+        comments: Comments,
+        format: FormatMetadata,
+    ) -> Self {
+        Self {
+            value,
+            span,
+            comments,
+            format,
         }
     }
 
@@ -316,9 +443,7 @@ impl AstNode {
                     "env" => self.handle_env_function(args),
                     "size" => self.handle_size_function(args),
                     "duration" => self.handle_duration_function(args),
-                    _ => Err(NomlError::validation(format!(
-                        "Unknown function: {name}"
-                    ))),
+                    _ => Err(NomlError::validation(format!("Unknown function: {name}"))),
                 }
             }
             AstValue::Interpolation { path } => {
@@ -335,9 +460,7 @@ impl AstNode {
                     "Unresolved include directive",
                 ))
             }
-            AstValue::Native { type_name, args } => {
-                self.handle_native_type(type_name, args)
-            }
+            AstValue::Native { type_name, args } => self.handle_native_type(type_name, args),
         }
     }
 
@@ -431,15 +554,17 @@ impl AstNode {
     fn handle_env_function(&self, args: &[AstNode]) -> Result<Value> {
         if args.is_empty() || args.len() > 2 {
             return Err(NomlError::validation(
-                "env() function requires 1 or 2 arguments"
+                "env() function requires 1 or 2 arguments",
             ));
         }
 
         let var_name = match args[0].to_value()? {
             Value::String(name) => name,
-            _ => return Err(NomlError::validation(
-                "env() first argument must be a string"
-            )),
+            _ => {
+                return Err(NomlError::validation(
+                    "env() first argument must be a string",
+                ));
+            }
         };
 
         match std::env::var(&var_name) {
@@ -459,29 +584,25 @@ impl AstNode {
     fn handle_size_function(&self, args: &[AstNode]) -> Result<Value> {
         if args.len() != 1 {
             return Err(NomlError::validation(
-                "size() function requires exactly 1 argument"
+                "size() function requires exactly 1 argument",
             ));
         }
 
         let size_str = match args[0].to_value()? {
             Value::String(s) => s,
-            _ => return Err(NomlError::validation(
-                "size() argument must be a string"
-            )),
+            _ => return Err(NomlError::validation("size() argument must be a string")),
         };
 
         parse_size(&size_str)
             .map(Value::Size)
-            .ok_or_else(|| NomlError::validation(format!(
-                "Invalid size format: {size_str}"
-            )))
+            .ok_or_else(|| NomlError::validation(format!("Invalid size format: {size_str}")))
     }
 
     /// Handle duration() function calls
     fn handle_duration_function(&self, args: &[AstNode]) -> Result<Value> {
         if args.len() != 1 {
             return Err(NomlError::validation(
-                "duration() function requires exactly 1 argument"
+                "duration() function requires exactly 1 argument",
             ));
         }
 
@@ -489,19 +610,19 @@ impl AstNode {
             Value::String(s) => s,
             _ => {
                 return Err(NomlError::validation(
-                    "duration() argument must be a string"
-                ))
+                    "duration() argument must be a string",
+                ));
             }
         };
 
         parse_duration(&duration_str)
             .map(Value::Duration)
-            .ok_or_else(|| NomlError::validation(format!(
-                "Invalid duration format: {duration_str}"
-            )))
+            .ok_or_else(|| {
+                NomlError::validation(format!("Invalid duration format: {duration_str}"))
+            })
     }
 
-   /// Handle native type constructors
+    /// Handle native type constructors
     fn handle_native_type(&self, type_name: &str, args: &[AstNode]) -> Result<Value> {
         match type_name {
             "size" => self.handle_size_function(args),
@@ -516,7 +637,14 @@ impl AstNode {
 
 impl Span {
     /// Create a new span
-    pub fn new(start: usize, end: usize, start_line: usize, start_column: usize, end_line: usize, end_column: usize) -> Self {
+    pub fn new(
+        start: usize,
+        end: usize,
+        start_line: usize,
+        start_column: usize,
+        end_line: usize,
+        end_column: usize,
+    ) -> Self {
         Self {
             start,
             end,
@@ -690,7 +818,7 @@ mod tests {
         let span1 = Span::new(10, 20, 1, 10, 1, 20);
         let span2 = Span::new(15, 25, 1, 15, 1, 25);
         let merged = span1.merge(&span2);
-        
+
         assert_eq!(merged.start, 10);
         assert_eq!(merged.end, 25);
         assert!(merged.contains(12));
@@ -741,7 +869,7 @@ mod tests {
     #[test]
     fn ast_to_value_conversion() {
         let span = Span::new(0, 4, 1, 1, 1, 4);
-        
+
         // Test simple values
         let bool_node = AstNode::new(AstValue::Bool(true), span.clone());
         assert_eq!(bool_node.to_value().unwrap(), Value::Bool(true));
@@ -763,6 +891,9 @@ mod tests {
             },
             span,
         );
-        assert_eq!(str_node.to_value().unwrap(), Value::String("hello".to_string()));
+        assert_eq!(
+            str_node.to_value().unwrap(),
+            Value::String("hello".to_string())
+        );
     }
 }
