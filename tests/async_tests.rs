@@ -1,5 +1,5 @@
 //! Async functionality tests for NOML
-//! 
+//!
 //! These tests verify that async parsing and configuration management work correctly.
 
 #[cfg(feature = "async")]
@@ -7,8 +7,8 @@
 mod async_tests {
     use noml::{parse_async, parse_from_file_async, Config, Value};
     use std::env;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_parse_async_basic() {
@@ -19,8 +19,11 @@ mod async_tests {
         "#;
 
         let config = parse_async(source).await.unwrap();
-        
-        assert_eq!(config.get("name").unwrap().as_string().unwrap(), "async-test");
+
+        assert_eq!(
+            config.get("name").unwrap().as_string().unwrap(),
+            "async-test"
+        );
         assert_eq!(config.get("version").unwrap().as_string().unwrap(), "1.0.0");
         assert!(config.get("debug").unwrap().as_bool().unwrap());
     }
@@ -29,17 +32,27 @@ mod async_tests {
     async fn test_parse_from_file_async() {
         // Create a temporary file
         let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file, r#"
+        write!(
+            temp_file,
+            r#"
             app_name = "file-test"
             server.port = 8080
             features = ["async", "parsing"]
-        "#).unwrap();
+        "#
+        )
+        .unwrap();
 
         let config = parse_from_file_async(temp_file.path()).await.unwrap();
-        
-        assert_eq!(config.get("app_name").unwrap().as_string().unwrap(), "file-test");
-        assert_eq!(config.get("server.port").unwrap().as_integer().unwrap(), 8080);
-        
+
+        assert_eq!(
+            config.get("app_name").unwrap().as_string().unwrap(),
+            "file-test"
+        );
+        assert_eq!(
+            config.get("server.port").unwrap().as_integer().unwrap(),
+            8080
+        );
+
         let features = config.get("features").unwrap().as_array().unwrap();
         assert_eq!(features.len(), 2);
         assert_eq!(features[0].as_string().unwrap(), "async");
@@ -50,16 +63,26 @@ mod async_tests {
     async fn test_config_load_async() {
         // Create a temporary file
         let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file, r#"
+        write!(
+            temp_file,
+            r#"
             database.host = "localhost"
             database.port = 5432
             cache.enabled = true
-        "#).unwrap();
+        "#
+        )
+        .unwrap();
 
         let config = Config::load_async(temp_file.path()).await.unwrap();
-        
-        assert_eq!(config.get("database.host").unwrap().as_string().unwrap(), "localhost");
-        assert_eq!(config.get("database.port").unwrap().as_integer().unwrap(), 5432);
+
+        assert_eq!(
+            config.get("database.host").unwrap().as_string().unwrap(),
+            "localhost"
+        );
+        assert_eq!(
+            config.get("database.port").unwrap().as_integer().unwrap(),
+            5432
+        );
         assert!(config.get("cache.enabled").unwrap().as_bool().unwrap());
     }
 
@@ -68,10 +91,15 @@ mod async_tests {
         let mut config = Config::new();
         config.set("app_name", "save-test").unwrap();
         config.set("server.port", 9000).unwrap();
-        config.set("features", Value::Array(vec![
-            Value::String("async".to_string()), 
-            Value::String("save".to_string())
-        ])).unwrap();
+        config
+            .set(
+                "features",
+                Value::Array(vec![
+                    Value::String("async".to_string()),
+                    Value::String("save".to_string()),
+                ]),
+            )
+            .unwrap();
 
         // Save to temporary file
         let temp_file = NamedTempFile::new().unwrap();
@@ -79,33 +107,52 @@ mod async_tests {
 
         // Reload and verify
         let reloaded = Config::load_async(temp_file.path()).await.unwrap();
-        assert_eq!(reloaded.get("app_name").unwrap().as_string().unwrap(), "save-test");
-        assert_eq!(reloaded.get("server.port").unwrap().as_integer().unwrap(), 9000);
+        assert_eq!(
+            reloaded.get("app_name").unwrap().as_string().unwrap(),
+            "save-test"
+        );
+        assert_eq!(
+            reloaded.get("server.port").unwrap().as_integer().unwrap(),
+            9000
+        );
     }
 
     #[tokio::test]
     async fn test_config_reload_async() {
         // Create initial file
         let mut temp_file = NamedTempFile::new().unwrap();
-        write!(temp_file, r#"
+        write!(
+            temp_file,
+            r#"
             initial_value = "original"
             counter = 1
-        "#).unwrap();
+        "#
+        )
+        .unwrap();
 
         let mut config = Config::load_async(temp_file.path()).await.unwrap();
-        assert_eq!(config.get("initial_value").unwrap().as_string().unwrap(), "original");
+        assert_eq!(
+            config.get("initial_value").unwrap().as_string().unwrap(),
+            "original"
+        );
         assert_eq!(config.get("counter").unwrap().as_integer().unwrap(), 1);
 
         // Modify config in memory
         config.set("initial_value", "modified").unwrap();
         config.set("counter", 999).unwrap();
-        
-        assert_eq!(config.get("initial_value").unwrap().as_string().unwrap(), "modified");
+
+        assert_eq!(
+            config.get("initial_value").unwrap().as_string().unwrap(),
+            "modified"
+        );
         assert_eq!(config.get("counter").unwrap().as_integer().unwrap(), 999);
 
         // Reload should restore original values
         config.reload_async().await.unwrap();
-        assert_eq!(config.get("initial_value").unwrap().as_string().unwrap(), "original");
+        assert_eq!(
+            config.get("initial_value").unwrap().as_string().unwrap(),
+            "original"
+        );
         assert_eq!(config.get("counter").unwrap().as_integer().unwrap(), 1);
     }
 
@@ -121,10 +168,16 @@ mod async_tests {
         "#;
 
         let config = parse_async(source).await.unwrap();
-        
-        assert_eq!(config.get("host").unwrap().as_string().unwrap(), "async.example.com");
+
+        assert_eq!(
+            config.get("host").unwrap().as_string().unwrap(),
+            "async.example.com"
+        );
         assert_eq!(config.get("port").unwrap().as_string().unwrap(), "7777");
-        assert_eq!(config.get("fallback").unwrap().as_string().unwrap(), "default_async");
+        assert_eq!(
+            config.get("fallback").unwrap().as_string().unwrap(),
+            "default_async"
+        );
 
         // Clean up
         env::remove_var("ASYNC_TEST_PORT");
@@ -148,14 +201,31 @@ mod async_tests {
         "#;
 
         let config = parse_async(source).await.unwrap();
-        
-        assert_eq!(config.get("app_name").unwrap().as_string().unwrap(), "async-interpolation");
+
+        assert_eq!(
+            config.get("app_name").unwrap().as_string().unwrap(),
+            "async-interpolation"
+        );
         assert_eq!(config.get("version").unwrap().as_string().unwrap(), "2.0.0");
         assert!(config.get("enabled").unwrap().as_bool().unwrap());
-        assert_eq!(config.get("database.host").unwrap().as_string().unwrap(), "localhost");
-        assert_eq!(config.get("database.port").unwrap().as_integer().unwrap(), 5432);
-        assert!(config.get("features.async_support").unwrap().as_bool().unwrap());
-        assert!(!config.get("features.hot_reload").unwrap().as_bool().unwrap());
+        assert_eq!(
+            config.get("database.host").unwrap().as_string().unwrap(),
+            "localhost"
+        );
+        assert_eq!(
+            config.get("database.port").unwrap().as_integer().unwrap(),
+            5432
+        );
+        assert!(config
+            .get("features.async_support")
+            .unwrap()
+            .as_bool()
+            .unwrap());
+        assert!(!config
+            .get("features.hot_reload")
+            .unwrap()
+            .as_bool()
+            .unwrap());
     }
 
     #[tokio::test]
@@ -180,14 +250,17 @@ mod async_tests {
         let source = r#"
             base_config = include "https://example.com/config.noml"
         "#;
-        
+
         let result = noml::parse(source);
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("HTTP includes require async") || error_msg.contains("async resolver"));
+        assert!(
+            error_msg.contains("HTTP includes require async")
+                || error_msg.contains("async resolver")
+        );
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_async_new_native_types() {
         let source = r#"
             server_ip = @ip("192.168.1.1")
@@ -197,10 +270,22 @@ mod async_tests {
         "#;
 
         let config = parse_async(source).await.unwrap();
-        
-        assert_eq!(config.get("server_ip").unwrap().as_string().unwrap(), "192.168.1.1");
-        assert_eq!(config.get("app_version").unwrap().as_string().unwrap(), "1.2.3");
-        assert_eq!(config.get("secret_data").unwrap().as_string().unwrap(), "SGVsbG8gV29ybGQ=");
-        assert_eq!(config.get("user_id").unwrap().as_string().unwrap(), "550e8400-e29b-41d4-a716-446655440000");
+
+        assert_eq!(
+            config.get("server_ip").unwrap().as_string().unwrap(),
+            "192.168.1.1"
+        );
+        assert_eq!(
+            config.get("app_version").unwrap().as_string().unwrap(),
+            "1.2.3"
+        );
+        assert_eq!(
+            config.get("secret_data").unwrap().as_string().unwrap(),
+            "SGVsbG8gV29ybGQ="
+        );
+        assert_eq!(
+            config.get("user_id").unwrap().as_string().unwrap(),
+            "550e8400-e29b-41d4-a716-446655440000"
+        );
     }
 }
