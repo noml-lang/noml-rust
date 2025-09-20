@@ -753,7 +753,7 @@ impl<'a> NomlParser<'a> {
     }
 
     /// Peek at current token
-    fn peek(&self) -> Result<&Token> {
+    fn peek(&self) -> Result<&Token<'_>> {
         self.tokens
             .get(self.pos)
             .ok_or_else(|| NomlError::parse("Unexpected end of input", 1, 1))
@@ -793,7 +793,7 @@ impl<'a> NomlParser<'a> {
     }
 
     /// Consume token or return error
-    fn consume_token(&mut self, kind: &TokenKind, message: &str) -> Result<&Token> {
+    fn consume_token(&mut self, kind: &TokenKind, message: &str) -> Result<&Token<'_>> {
         if self.check_token(kind) {
             let pos = self.pos;
             self.pos += 1;
