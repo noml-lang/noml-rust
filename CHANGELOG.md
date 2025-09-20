@@ -20,6 +20,17 @@
 - **Production-Ready Testing**: 66+ unit tests plus comprehensive integration and documentation tests
 - **Enterprise-Grade CI/CD**: Complete GitHub Actions pipeline with cross-platform testing, security auditing, automated releases, and performance monitoring
 
+### CI/CD Infrastructure (2025-09-20)
+- **Streamlined Workflows**: Consolidated 6+ separate GitHub Actions workflows into 2 essential workflows for improved maintainability
+  - Unified CI pipeline (`ci.yml`) with cross-platform testing (Ubuntu, Windows, macOS), multiple Rust versions, formatting, linting, and security checks
+  - Dedicated benchmark workflow (`benchmark.yml`) for performance monitoring
+  - Removed redundant security and separate testing workflows
+- **Clippy Compliance**: Fixed lifetime syntax warnings in parser components (`src/parser/grammar.rs` and `src/parser/lexer.rs`) with explicit `Token<'_>` lifetime annotations
+- **Dependency Auditing**: Updated `deny.toml` to v2 format removing deprecated 'deny' and 'copyleft' keys for proper cargo-deny compatibility
+- **MSRV Compatibility**: Regenerated `Cargo.lock` with Rust 1.70.0 to ensure lockfile version 3 compatibility with minimum supported Rust version
+- **Local CI Script**: Enhanced `scripts/local-ci.sh` for comprehensive local validation matching GitHub Actions pipeline
+- **Security Integration**: Integrated security auditing directly into main CI workflow for streamlined dependency vulnerability checking
+
 ### Enhanced
 - **Zero-Copy Performance**: Optimized lexer and parser for maximum performance with full format preservation
 - **Error Context**: Enhanced error messages throughout parser and resolver with actionable suggestions
@@ -125,8 +136,6 @@
 - **Thread Safety**: Verified and tested `Send + Sync` implementations for all core types (`Value`, `Config`, `NativeResolver`)
 - **Test Suite Expansion**: Total test count increased to 96 tests (55 unit + 2 main + 16 integration + 15 doc + 8 async tests)
 - **Development Dependencies**: Added tokio test macros and async runtime for comprehensive async testing
-
-
 
 
 
