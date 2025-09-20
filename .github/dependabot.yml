@@ -1,0 +1,54 @@
+version: 2
+updates:
+  # Enable version updates for dependencies
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "noml-lang/maintainers"  # Update with your team
+    assignees:
+      - "noml-lang/maintainers"  # Update with your team
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      # Group dev dependencies together
+      dev-dependencies:
+        patterns:
+          - "criterion"
+          - "tokio-test"
+          - "tempfile"
+      # Group serde ecosystem together
+      serde:
+        patterns:
+          - "serde*"
+      # Group async ecosystem together
+      async:
+        patterns:
+          - "tokio*"
+          - "async*"
+          - "futures*"
+
+  # Enable security updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "noml-lang/maintainers"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "github-actions"
+      - "ci"
