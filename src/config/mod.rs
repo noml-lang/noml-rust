@@ -226,6 +226,7 @@ impl Config {
     /// assert_eq!(port.as_integer().unwrap(), 5432);
     /// # Ok::<(), noml::NomlError>(())
     /// ```
+    #[inline]
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.values.get(key)
     }
@@ -270,7 +271,8 @@ impl Config {
         if !self.values.contains_key(key) {
             self.set(key, default.into())?;
         }
-        Ok(self.values.get(key).unwrap())
+        self.values.get(key)
+            .ok_or_else(|| NomlError::validation(format!("Failed to get key '{key}' after insertion")))
     }
 
     /// Set a value by key path
@@ -442,15 +444,8 @@ impl Config {
                 for (key, value) in other_table {
                     if let Some(existing) = self_table.get_mut(key) {
                         if existing.is_table() && value.is_table() {
-                            // Recursively merge nested tables
-                            let mut temp_config = Config {
-                                values: existing.clone(),
-                                document: self.document.clone(),
-                                source_path: None,
-                                modified: false,
-                            };
-                            temp_config.merge_value(value)?;
-                            *existing = temp_config.values;
+                            // Recursively merge nested tables directly
+                            Self::merge_tables(existing.as_table_mut()?, value.as_table()?)?;
                         } else {
                             // Replace value
                             *existing = value.clone();
@@ -464,6 +459,25 @@ impl Config {
             }
             _ => Err(NomlError::validation("Cannot merge non-table values")),
         }
+    }
+
+    /// Helper method to merge tables directly without creating temporary Config objects
+    fn merge_tables(target: &mut BTreeMap<String, Value>, source: &BTreeMap<String, Value>) -> Result<()> {
+        for (key, value) in source {
+            if let Some(existing) = target.get_mut(key) {
+                if existing.is_table() && value.is_table() {
+                    // Recursively merge nested tables
+                    Self::merge_tables(existing.as_table_mut()?, value.as_table()?)?;
+                } else {
+                    // Replace value
+                    *existing = value.clone();
+                }
+            } else {
+                // Insert new value
+                target.insert(key.clone(), value.clone());
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::only_used_in_recursion)]
@@ -623,7 +637,7 @@ impl Config {
             Some(path.as_ref().to_string_lossy().to_string()),
         )?;
         let mut resolver = crate::resolver::Resolver::new();
-        let values = resolver.resolve(document.clone())?;
+        let values = resolver.resolve(&document)?;
 
         Ok(Config {
             document,
