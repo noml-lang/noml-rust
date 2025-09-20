@@ -27,6 +27,8 @@
   - Removed redundant security and separate testing workflows
 - **Clippy Compliance**: Fixed lifetime syntax warnings in parser components (`src/parser/grammar.rs` and `src/parser/lexer.rs`) with explicit `Token<'_>` lifetime annotations
 - **Dependency Auditing**: Updated `deny.toml` to v2 format removing deprecated 'deny' and 'copyleft' keys for proper cargo-deny compatibility
+  - Refined license allowlist to only include licenses actually used by dependencies (MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, LGPL-2.1-or-later, Unicode-3.0)
+  - Eliminated warnings about unused license allowances for cleaner CI output
 - **MSRV Update**: Updated minimum supported Rust version from 1.65 to 1.82.0 to support modern dependency ecosystem (ICU, HTTP clients, etc.)
 - **Cargo.lock Regeneration**: Regenerated `Cargo.lock` with latest compatible dependency versions for improved security and compatibility
 - **Local CI Script**: Enhanced `scripts/local-ci.sh` for comprehensive local validation matching GitHub Actions pipeline
