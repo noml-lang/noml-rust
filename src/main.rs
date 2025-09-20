@@ -1,5 +1,5 @@
 //! # NOML CLI Tool
-//! 
+//!
 //! Command-line interface for NOML (Nested Object Markup Language).
 //! This tool provides validation, conversion, and formatting capabilities.
 
@@ -9,7 +9,7 @@ use std::process;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() < 2 {
         eprintln!("NOML v{}", env!("CARGO_PKG_VERSION"));
         eprintln!("Usage: {} <command> [options]", args[0]);
@@ -24,9 +24,9 @@ fn main() {
         eprintln!("  {} parse app.noml", args[0]);
         process::exit(1);
     }
-    
+
     let command = &args[1];
-    
+
     match command.as_str() {
         "version" => {
             // Print version information using noml crate's version function if available, or hardcode as fallback
@@ -34,27 +34,27 @@ fn main() {
             // println!("Feature: serde enabled");
             // println!("Feature: chrono enabled");
         }
-        
+
         "validate" => {
             if args.len() < 3 {
                 eprintln!("Error: validate command requires a file path");
                 process::exit(1);
             }
-            
+
             let file_path = &args[2];
             validate_file(file_path);
         }
-        
+
         "parse" => {
             if args.len() < 3 {
                 eprintln!("Error: parse command requires a file path");
                 process::exit(1);
             }
-            
+
             let file_path = &args[2];
             parse_file(file_path);
         }
-        
+
         _ => {
             eprintln!("Error: unknown command '{command}'");
             eprintln!("Run with no arguments to see usage information.");
@@ -71,7 +71,7 @@ fn validate_file(file_path: &str) {
             process::exit(1);
         }
     };
-    
+
     match noml::validate(&content) {
         Ok(()) => {
             println!("✓ {file_path} is valid NOML");
@@ -92,7 +92,7 @@ fn parse_file(file_path: &str) {
             process::exit(1);
         }
     };
-    
+
     let document = match noml::parse(&content) {
         Ok(doc) => doc,
         Err(err) => {
@@ -102,17 +102,17 @@ fn parse_file(file_path: &str) {
         }
     };
 
-let value = document;
+    let value = document;
 
-println!("Successfully parsed '{file_path}':");
-println!();
-println!("Structure:");
-display_value(&value, 0);
+    println!("Successfully parsed '{file_path}':");
+    println!();
+    println!("Structure:");
+    display_value(&value, 0);
 }
 
 fn display_value(value: &noml::Value, indent: usize) {
     let indent_str = "  ".repeat(indent);
-    
+
     match value {
         noml::Value::Null => println!("{indent_str}null"),
         noml::Value::Bool(b) => println!("{indent_str}{b}"),
@@ -139,7 +139,9 @@ fn display_value(value: &noml::Value, indent: usize) {
             println!("{indent_str}}}");
         }
         #[cfg(feature = "chrono")]
-        noml::Value::DateTime(dt) => println!("{}{}", indent_str, dt.format("%Y-%m-%d %H:%M:%S UTC")),
+        noml::Value::DateTime(dt) => {
+            println!("{}{}", indent_str, dt.format("%Y-%m-%d %H:%M:%S UTC"))
+        }
     }
 }
 
@@ -147,22 +149,26 @@ fn display_value(value: &noml::Value, indent: usize) {
 mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
-    
+
     #[test]
     fn test_validate_valid_file() {
         let mut file = NamedTempFile::new().unwrap();
-        write!(file, r#"
+        write!(
+            file,
+            r#"
         name = "test"
         [section]
         key = "value"
-        "#).unwrap();
-        
+        "#
+        )
+        .unwrap();
+
         // This would normally call validate_file, but we can't test process::exit
         // Instead, test the underlying functionality
         let content = std::fs::read_to_string(file.path()).unwrap();
         assert!(noml::validate(&content).is_ok());
     }
-    
+
     #[test]
     fn test_parse_functionality() {
         let config = r#"
@@ -173,12 +179,18 @@ mod tests {
         host = "localhost"
         port = 5432
         "#;
-        
+
         let value = noml::parse(config).unwrap();
-        
+
         assert_eq!(value.get("name").unwrap().as_string().unwrap(), "test_app");
         assert_eq!(value.get("version").unwrap().as_float().unwrap(), 1.0);
-        assert_eq!(value.get("database.host").unwrap().as_string().unwrap(), "localhost");
-        assert_eq!(value.get("database.port").unwrap().as_integer().unwrap(), 5432);
+        assert_eq!(
+            value.get("database.host").unwrap().as_string().unwrap(),
+            "localhost"
+        );
+        assert_eq!(
+            value.get("database.port").unwrap().as_integer().unwrap(),
+            5432
+        );
     }
 }
