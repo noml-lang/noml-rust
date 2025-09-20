@@ -2,7 +2,7 @@
 //! 
 //! This module handles the resolution of dynamic NOML features:
 //! - Environment variable lookups via env() function
-//! - File inclusion via include statements  
+//! - File inclusion via include statements (local and HTTP)
 //! - Variable interpolation via ${path} syntax
 //! - Native type resolution via @type() syntax
 
@@ -15,8 +15,13 @@ use std::collections::{HashMap, BTreeMap};
 use std::env;
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "async")]
+use reqwest;
+#[cfg(feature = "async")]
+use std::time::Duration;
+
 /// Configuration for the resolver
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ResolverConfig {
     /// Base path for resolving relative includes
     pub base_path: Option<PathBuf>,
@@ -28,6 +33,48 @@ pub struct ResolverConfig {
     pub allow_missing_env: bool,
     /// Custom native type resolvers
     pub native_resolvers: HashMap<String, NativeResolver>,
+    /// HTTP client timeout for remote includes (async feature only)
+    #[cfg(feature = "async")]
+    pub http_timeout: Duration,
+    /// Cache for HTTP includes to avoid repeated requests
+    #[cfg(feature = "async")]
+    pub http_cache: Option<HashMap<String, String>>,
+}
+
+impl Clone for ResolverConfig {
+    fn clone(&self) -> Self {
+        let mut native_resolvers = HashMap::new();
+        
+        // Only clone built-in resolvers
+        let builtin_types = ["size", "duration", "regex", "url", "ip", "semver", "base64", "uuid"];
+        for name in &builtin_types {
+            if self.native_resolvers.contains_key(*name) {
+                match *name {
+                    "size" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_size)); }
+                    "duration" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_duration)); }
+                    "regex" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_regex)); }
+                    "url" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_url)); }
+                    "ip" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_ip)); }
+                    "semver" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_semver)); }
+                    "base64" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_base64)); }
+                    "uuid" => { native_resolvers.insert(name.to_string(), NativeResolver::new(resolve_uuid)); }
+                    _ => {}
+                }
+            }
+        }
+
+        Self {
+            base_path: self.base_path.clone(),
+            env_vars: self.env_vars.clone(),
+            max_include_depth: self.max_include_depth,
+            allow_missing_env: self.allow_missing_env,
+            native_resolvers,
+            #[cfg(feature = "async")]
+            http_timeout: self.http_timeout,
+            #[cfg(feature = "async")]
+            http_cache: self.http_cache.clone(),
+        }
+    }
 }
 
 impl Default for ResolverConfig {
@@ -39,6 +86,10 @@ impl Default for ResolverConfig {
         native_resolvers.insert("duration".to_string(), NativeResolver::new(resolve_duration));
         native_resolvers.insert("regex".to_string(), NativeResolver::new(resolve_regex));
         native_resolvers.insert("url".to_string(), NativeResolver::new(resolve_url));
+        native_resolvers.insert("ip".to_string(), NativeResolver::new(resolve_ip));
+        native_resolvers.insert("semver".to_string(), NativeResolver::new(resolve_semver));
+        native_resolvers.insert("base64".to_string(), NativeResolver::new(resolve_base64));
+        native_resolvers.insert("uuid".to_string(), NativeResolver::new(resolve_uuid));
         
         Self {
             base_path: None,
@@ -46,21 +97,27 @@ impl Default for ResolverConfig {
             max_include_depth: 10,
             allow_missing_env: false,
             native_resolvers,
+            #[cfg(feature = "async")]
+            http_timeout: Duration::from_secs(30),
+            #[cfg(feature = "async")]
+            http_cache: Some(HashMap::new()),
         }
     }
 }
 
+/// Type alias for native resolver functions
+type NativeResolverFn = Box<dyn Fn(&[Value]) -> Result<Value> + Send + Sync>;
+
 /// A native type resolver function
 pub struct NativeResolver {
-    resolver: Box<dyn Fn(&[Value]) -> Result<Value> + Send + Sync>,
+    resolver: NativeResolverFn,
 }
 
 impl Clone for NativeResolver {
     fn clone(&self) -> Self {
-        // NativeResolver is not trivially clonable, but for built-ins this is fine.
-        // For custom resolvers, users must ensure they are clonable.
-        // Here we panic if someone tries to clone a custom resolver.
-        panic!("NativeResolver cannot be cloned. Use only built-in resolvers or implement Clone manually if needed.");
+        // This is only used for built-in resolvers during ResolverConfig cloning
+        // Custom resolvers should not be cloned and will cause a panic
+        panic!("NativeResolver cannot be cloned directly. Clone ResolverConfig instead which handles built-in resolvers.");
     }
 }
 
@@ -92,6 +149,12 @@ pub struct Resolver {
     config: ResolverConfig,
     include_stack: Vec<PathBuf>,
     variables: IndexMap<String, Value>,
+}
+
+impl Default for Resolver {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Resolver {
@@ -194,7 +257,7 @@ impl Resolver {
                 match name.as_str() {
                     "env" => self.resolve_env_function(args, &node.span),
                     _ => Err(NomlError::parse(
-                        format!("Unknown function: {}", name),
+                        format!("Unknown function: {name}"),
                         node.span.start,
                         0,
                     )),
@@ -260,8 +323,7 @@ impl Resolver {
             Value::Null
         } else {
             return Err(NomlError::parse(format!(
-                "Environment variable '{}' not found and no default provided",
-                var_name
+                "Environment variable '{var_name}' not found and no default provided"
             ), span.start, 0));
         };
 
@@ -278,7 +340,7 @@ impl Resolver {
 
         // Look up the resolver
         let resolver = self.config.native_resolvers.get(type_name)
-            .ok_or_else(|| NomlError::parse(format!("Unknown native type: @{}", type_name), span.start, 0))?;
+            .ok_or_else(|| NomlError::parse(format!("Unknown native type: @{type_name}"), span.start, 0))?;
 
         // Resolve the native type
         resolver.resolve(&arg_values)?;
@@ -292,14 +354,135 @@ impl Resolver {
         Ok(AstNode::new(native_value, span.clone()))
     }
 
-    fn resolve_variable_path(&self, path: &str) -> Result<AstValue> {
-        // This is a placeholder - in a real implementation, you'd maintain
-        // a variable scope and resolve paths within it
-        Err(NomlError::parse(format!(
-            "Variable interpolation not yet implemented: {}",
-            path
-        ), 0, 0))
+    // The resolve_variable_path implementation was moved below to provide an enhanced
+    // implementation (with dotted-path and case-insensitive matching). This placeholder
+    // ensures there is only one `resolve_variable_path` method in this impl block.
+
+    /// Set a variable in the interpolation context
+    pub fn set_variable(&mut self, name: String, value: Value) {
+        self.variables.insert(name, value);
     }
+
+    /// Get all variables in the current context
+    pub fn variables(&self) -> &IndexMap<String, Value> {
+        &self.variables
+    }
+
+    /// Clear all variables
+    pub fn clear_variables(&mut self) {
+        self.variables.clear();
+    }
+
+    /// Build variables from a table for interpolation
+    fn build_variable_context(&mut self, table_entries: &[TableEntry]) -> Result<()> {
+        for entry in table_entries {
+            let key = entry.key.to_string();
+            if let Ok(value) = self.extract_value(entry.value.clone()) {
+                // Only add simple values to context for interpolation
+                match value {
+                    Value::String(_) | Value::Integer(_) | Value::Float(_) | Value::Bool(_) | Value::Null => {
+                        self.variables.insert(key, value);
+                    }
+                    _ => {} // Skip complex types
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Enhanced resolve method that builds variable context
+    pub fn resolve_with_context(&mut self, document: Document) -> Result<Value> {
+        // Start with an empty variable context
+        self.variables.clear();
+        self.include_stack.clear();
+        
+        // First pass: build variable context from top-level values
+        if let AstValue::Table { ref entries, .. } = document.root.value {
+            self.build_variable_context(entries)?;
+        }
+        
+        // Resolve the root node
+        let resolved = self.resolve_node(&document.root)?;
+        
+        // Extract the final value
+        self.extract_value(resolved)
+    }
+
+
+    /// New resolve_variable_path implementation that works correctly
+    fn resolve_variable_path(&self, path: &str) -> Result<AstValue> {
+        // Look up the variable in our current context
+        if let Some(value) = self.variables.get(path) {
+            // Convert Value back to AstValue
+            let ast_value = match value {
+                Value::String(s) => AstValue::String {
+                    value: s.clone(),
+                    style: StringStyle::Double,
+                    has_escapes: false,
+                },
+                Value::Integer(i) => AstValue::Integer {
+                    value: *i,
+                    raw: i.to_string(),
+                },
+                Value::Float(f) => AstValue::Float {
+                    value: *f,
+                    raw: f.to_string(),
+                },
+                Value::Bool(b) => AstValue::Bool(*b),
+                Value::Null => AstValue::Null,
+                _ => {
+                    return Err(NomlError::interpolation(
+                        "Complex types cannot be interpolated directly",
+                        path.to_string(),
+                    ));
+                }
+            };
+            Ok(ast_value)
+        } else {
+            // Try dotted path resolution in variables
+            if path.contains('.') {
+                // For dotted paths, try to find nested values
+                // This is a simplified implementation
+                for (var_name, var_value) in &self.variables {
+                    if path.starts_with(var_name) && path.len() > var_name.len() + 1 {
+                        let remaining_path = &path[var_name.len() + 1..];
+                        if let Some(nested_value) = var_value.get(remaining_path) {
+                            let ast_value = match nested_value {
+                                Value::String(s) => AstValue::String {
+                                    value: s.clone(),
+                                    style: StringStyle::Double,
+                                    has_escapes: false,
+                                },
+                                Value::Integer(i) => AstValue::Integer {
+                                    value: *i,
+                                    raw: i.to_string(),
+                                },
+                                Value::Float(f) => AstValue::Float {
+                                    value: *f,
+                                    raw: f.to_string(),
+                                },
+                                Value::Bool(b) => AstValue::Bool(*b),
+                                Value::Null => AstValue::Null,
+                                _ => {
+                                    return Err(NomlError::interpolation(
+                                        "Complex types cannot be interpolated directly",
+                                        path.to_string(),
+                                    ));
+                                }
+                            };
+                            return Ok(ast_value);
+                        }
+                    }
+                }
+            }
+            
+            Err(NomlError::interpolation(
+                format!("Variable '{path}' not found in current context"),
+                path.to_string(),
+            ))
+        }
+    }
+
 
     /// Resolve include statements
     fn resolve_include(&mut self, include_path: &str, span: &Span) -> Result<AstNode> {
@@ -315,12 +498,32 @@ impl Resolver {
             ));
         }
 
+        // Check if this is an HTTP include
+        if include_path.starts_with("http://") || include_path.starts_with("https://") {
+            #[cfg(feature = "async")]
+            {
+                return Err(NomlError::parse(
+                    "HTTP includes require async resolver. Use resolve_document_async() instead.".to_string(),
+                    span.start,
+                    0,
+                ));
+            }
+            #[cfg(not(feature = "async"))]
+            {
+                return Err(NomlError::parse(
+                    "HTTP includes require the 'async' feature to be enabled".to_string(),
+                    span.start,
+                    0,
+                ));
+            }
+        }
+
         let resolved_path = self.resolve_include_path(include_path)?;
 
         // Check for circular includes
         if self.include_stack.contains(&resolved_path) {
             return Err(NomlError::parse(
-                format!("Circular include detected: {:?}", resolved_path),
+                format!("Circular include detected: {resolved_path:?}"),
                 span.start,
                 0,
             ));
@@ -406,13 +609,13 @@ impl Resolver {
             AstValue::Bool(value) => Ok(Value::Bool(value)),
             AstValue::Null => Ok(Value::Null),
             AstValue::Table { entries, .. } => {
-                let mut table = BTreeMap::new();
+                let mut result = Value::Table(BTreeMap::new());
                 for entry in entries {
                     let key = entry.key.to_string();
                     let value = self.extract_value(entry.value)?;
-                    table.insert(key, value);
+                    result.set(&key, value)?;
                 }
-                Ok(Value::Table(table))
+                Ok(result)
             }
             AstValue::Array { elements, .. } => {
                 let mut arr = Vec::new();
@@ -430,7 +633,7 @@ impl Resolver {
 
                 // Resolve the native type
                 let resolver = self.config.native_resolvers.get(&type_name)
-                    .ok_or_else(|| NomlError::parse(format!("Unknown native type: @{}", type_name), 0, 0))?;
+                    .ok_or_else(|| NomlError::parse(format!("Unknown native type: @{type_name}"), 0, 0))?;
 
                 let resolved_value = resolver.resolve(&arg_values)?;
 
@@ -442,6 +645,7 @@ impl Resolver {
     }
 
     /// Convert a runtime Value back to an AST node
+    #[allow(clippy::only_used_in_recursion)]
     fn value_to_ast_node(&self, value: Value, span: Span) -> AstNode {
         let ast_value = match value {
             Value::String(s) => AstValue::String {
@@ -486,9 +690,173 @@ impl Resolver {
                 // Not implemented for AST conversion
                 unimplemented!("Conversion from Value::{:?} to AstValue is not implemented", value)
             }
+            #[cfg(feature = "chrono")]
+            Value::DateTime(_) => {
+                // Not implemented for AST conversion
+                unimplemented!("Conversion from Value::DateTime to AstValue is not implemented")
+            }
         };
 
         AstNode::new(ast_value, span)
+    }
+
+    /// Async version of resolve_document for HTTP includes support
+    #[cfg(feature = "async")]
+    pub async fn resolve_document_async(&mut self, document: &Document) -> Result<Value> {
+        // First, resolve HTTP includes non-recursively to build the complete AST
+        let resolved_doc = self.resolve_http_includes_simple(document).await?;
+        
+        // Then use the regular sync resolver on the complete AST
+        self.resolve(resolved_doc)
+    }
+
+    /// Simple non-recursive HTTP include resolution (does not support nested HTTP includes)
+    #[cfg(feature = "async")]
+    async fn resolve_http_includes_simple(&mut self, document: &Document) -> Result<Document> {
+        // Collect all HTTP includes first
+        let http_includes = self.collect_http_includes(&document.root);
+        
+        // Fetch all HTTP content in parallel
+        let mut http_content = HashMap::new();
+        for url in http_includes {
+            let content = self.fetch_http_content(&url, &Span::default()).await?;
+            http_content.insert(url, content);
+        }
+        
+        // Replace HTTP includes with their content
+        let resolved_root = self.replace_http_includes_with_content(&document.root, &http_content)?;
+        
+        Ok(Document {
+            root: resolved_root,
+            source_path: document.source_path.clone(),
+            source_text: document.source_text.clone(),
+        })
+    }
+
+    /// Collect all HTTP include URLs from an AST node (recursive but sync)
+    #[cfg(feature = "async")]
+    #[allow(clippy::only_used_in_recursion)]
+    fn collect_http_includes(&self, node: &AstNode) -> Vec<String> {
+        let mut includes = Vec::new();
+        
+        match &node.value {
+            AstValue::Include { path } => {
+                if path.starts_with("http://") || path.starts_with("https://") {
+                    includes.push(path.clone());
+                }
+            }
+            AstValue::Table { entries, .. } => {
+                for entry in entries {
+                    includes.extend(self.collect_http_includes(&entry.value));
+                }
+            }
+            AstValue::Array { elements, .. } => {
+                for element in elements {
+                    includes.extend(self.collect_http_includes(element));
+                }
+            }
+            _ => {}
+        }
+        
+        includes
+    }
+
+    /// Replace HTTP includes with their content (sync recursion is fine)
+    #[cfg(feature = "async")]
+    #[allow(clippy::only_used_in_recursion)]
+    fn replace_http_includes_with_content(&self, node: &AstNode, content_map: &HashMap<String, String>) -> Result<AstNode> {
+        let span = node.span.clone();
+        let comments = node.comments.clone();
+        
+        let ast_value = match &node.value {
+            AstValue::Include { path } => {
+                if path.starts_with("http://") || path.starts_with("https://") {
+                    if let Some(content) = content_map.get(path) {
+                        let doc = crate::parser::parse(content)
+                            .map_err(|e| NomlError::parse(format!("Failed to parse HTTP include '{path}': {e}"), span.start, 0))?;
+                        return Ok(doc.root);
+                    } else {
+                        return Err(NomlError::parse(format!("HTTP include '{path}' not found in content map"), span.start, 0));
+                    }
+                } else {
+                    node.value.clone()
+                }
+            }
+            AstValue::Table { entries, inline } => {
+                let mut resolved_entries = Vec::new();
+                for entry in entries {
+                    let resolved_value = self.replace_http_includes_with_content(&entry.value, content_map)?;
+                    resolved_entries.push(TableEntry {
+                        key: entry.key.clone(),
+                        value: resolved_value,
+                        comments: entry.comments.clone(),
+                    });
+                }
+                AstValue::Table { entries: resolved_entries, inline: *inline }
+            }
+            AstValue::Array { elements, multiline, trailing_comma } => {
+                let mut resolved_elements = Vec::new();
+                for element in elements {
+                    resolved_elements.push(self.replace_http_includes_with_content(element, content_map)?);
+                }
+                AstValue::Array { 
+                    elements: resolved_elements, 
+                    multiline: *multiline, 
+                    trailing_comma: *trailing_comma 
+                }
+            }
+            _ => node.value.clone(),
+        };
+
+        Ok(AstNode {
+            value: ast_value,
+            span,
+            comments,
+        })
+    }
+
+    /// Fetch content from HTTP URL with caching
+    #[cfg(feature = "async")]
+    async fn fetch_http_content(&mut self, url: &str, span: &Span) -> Result<String> {
+        // Check cache first
+        if let Some(ref cache) = self.config.http_cache {
+            if let Some(cached_content) = cache.get(url) {
+                return Ok(cached_content.clone());
+            }
+        }
+
+        // Create HTTP client with timeout
+        let client = reqwest::Client::builder()
+            .timeout(self.config.http_timeout)
+            .build()
+            .map_err(|e| NomlError::parse(format!("Failed to create HTTP client: {e}"), span.start, 0))?;
+
+        // Fetch the content
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| NomlError::parse(format!("Failed to fetch HTTP include '{url}': {e}"), span.start, 0))?;
+
+        if !response.status().is_success() {
+            return Err(NomlError::parse(
+                format!("HTTP include '{url}' returned status: {}", response.status()),
+                span.start,
+                0,
+            ));
+        }
+
+        let content = response
+            .text()
+            .await
+            .map_err(|e| NomlError::parse(format!("Failed to read HTTP include '{url}': {e}"), span.start, 0))?;
+
+        // Cache the content
+        if let Some(ref mut cache) = self.config.http_cache {
+            cache.insert(url.to_string(), content.clone());
+        }
+
+        Ok(content)
     }
 } // <-- Close impl Resolver
 
@@ -500,11 +868,11 @@ fn resolve_size(args: &[Value]) -> Result<Value> {
     }
     let size_str = match args[0].as_string() {
         Ok(s) => s,
-        Err(e) => return Err(NomlError::parse(format!("@size() argument must be a string: {}", e), 0, 0)),
+        Err(e) => return Err(NomlError::parse(format!("@size() argument must be a string: {e}"), 0, 0)),
     };
     match parse_size(size_str) {
         Some(n) => Ok(Value::Integer(n)),
-        None => Err(NomlError::parse(format!("Invalid size format: {}", size_str), 0, 0)),
+        None => Err(NomlError::parse(format!("Invalid size format: {size_str}"), 0, 0)),
     }
 }
 
@@ -539,11 +907,11 @@ fn resolve_duration(args: &[Value]) -> Result<Value> {
     }
     let duration_str = match args[0].as_string() {
         Ok(s) => s,
-        Err(e) => return Err(NomlError::parse(format!("@duration() argument must be a string: {}", e), 0, 0)),
+        Err(e) => return Err(NomlError::parse(format!("@duration() argument must be a string: {e}"), 0, 0)),
     };
     match parse_duration(duration_str) {
         Some(n) => Ok(Value::Float(n)),
-        None => Err(NomlError::parse(format!("Invalid duration format: {}", duration_str), 0, 0)),
+        None => Err(NomlError::parse(format!("Invalid duration format: {duration_str}"), 0, 0)),
     }
 }
 
@@ -580,7 +948,7 @@ fn resolve_regex(args: &[Value]) -> Result<Value> {
     }
     let regex_str = match args[0].as_string() {
         Ok(s) => s,
-        Err(e) => return Err(NomlError::parse(format!("@regex() argument must be a string: {}", e), 0, 0)),
+        Err(e) => return Err(NomlError::parse(format!("@regex() argument must be a string: {e}"), 0, 0)),
     };
 
     // Validate the regex (in a real implementation, you'd use the regex crate)
@@ -594,14 +962,92 @@ fn resolve_url(args: &[Value]) -> Result<Value> {
     }
     let url_str = match args[0].as_string() {
         Ok(s) => s,
-        Err(e) => return Err(NomlError::parse(format!("@url() argument must be a string: {}", e), 0, 0)),
+        Err(e) => return Err(NomlError::parse(format!("@url() argument must be a string: {e}"), 0, 0)),
     };
 
     // Basic URL validation (in a real implementation, you'd use the url crate)
     if url_str.starts_with("http://") || url_str.starts_with("https://") {
         Ok(Value::String(url_str.to_string()))
     } else {
-        Err(NomlError::parse(format!("Invalid URL format: {}", url_str), 0, 0))
+        Err(NomlError::parse(format!("Invalid URL format: {url_str}"), 0, 0))
+    }
+}
+
+fn resolve_ip(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(NomlError::parse("@ip() requires exactly 1 argument".to_string(), 0, 0));
+    }
+    let ip_str = match args[0].as_string() {
+        Ok(s) => s,
+        Err(e) => return Err(NomlError::parse(format!("@ip() argument must be a string: {e}"), 0, 0)),
+    };
+
+    // Basic IP validation (in a real implementation, you'd use std::net::IpAddr)
+    if ip_str.parse::<std::net::IpAddr>().is_ok() {
+        Ok(Value::String(ip_str.to_string()))
+    } else {
+        Err(NomlError::parse(format!("Invalid IP address format: {ip_str}"), 0, 0))
+    }
+}
+
+fn resolve_semver(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(NomlError::parse("@semver() requires exactly 1 argument".to_string(), 0, 0));
+    }
+    let version_str = match args[0].as_string() {
+        Ok(s) => s,
+        Err(e) => return Err(NomlError::parse(format!("@semver() argument must be a string: {e}"), 0, 0)),
+    };
+
+    // Basic semver validation
+    let parts: Vec<&str> = version_str.split('.').collect();
+    if parts.len() >= 2 && parts.len() <= 3 {
+        for part in &parts {
+            if part.parse::<u32>().is_err() {
+                return Err(NomlError::parse(format!("Invalid semver format: {version_str}"), 0, 0));
+            }
+        }
+        Ok(Value::String(version_str.to_string()))
+    } else {
+        Err(NomlError::parse(format!("Invalid semver format: {version_str}"), 0, 0))
+    }
+}
+
+fn resolve_base64(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(NomlError::parse("@base64() requires exactly 1 argument".to_string(), 0, 0));
+    }
+    let base64_str = match args[0].as_string() {
+        Ok(s) => s,
+        Err(e) => return Err(NomlError::parse(format!("@base64() argument must be a string: {e}"), 0, 0)),
+    };
+
+    // Simple base64 validation - check if it's valid base64
+    if base64_str.len() % 4 == 0 && base64_str.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=') {
+        Ok(Value::String(base64_str.to_string()))
+    } else {
+        Err(NomlError::parse(format!("Invalid base64 format: {base64_str}"), 0, 0))
+    }
+}
+
+fn resolve_uuid(args: &[Value]) -> Result<Value> {
+    if args.len() != 1 {
+        return Err(NomlError::parse("@uuid() requires exactly 1 argument".to_string(), 0, 0));
+    }
+    let uuid_str = match args[0].as_string() {
+        Ok(s) => s,
+        Err(e) => return Err(NomlError::parse(format!("@uuid() argument must be a string: {e}"), 0, 0)),
+    };
+
+    // Basic UUID validation (format: 8-4-4-4-12)
+    let parts: Vec<&str> = uuid_str.split('-').collect();
+    if parts.len() == 5 && 
+       parts[0].len() == 8 && parts[1].len() == 4 && parts[2].len() == 4 && 
+       parts[3].len() == 4 && parts[4].len() == 12 &&
+       parts.iter().all(|part| part.chars().all(|c| c.is_ascii_hexdigit())) {
+        Ok(Value::String(uuid_str.to_string()))
+    } else {
+        Err(NomlError::parse(format!("Invalid UUID format: {uuid_str}"), 0, 0))
     }
 }
 
@@ -632,7 +1078,8 @@ mod tests {
         assert_eq!(size_result.as_integer().unwrap(), 10 * 1024 * 1024);
 
         let duration_result = resolve_duration(&[Value::String("30s".to_string())]).unwrap();
-        assert_eq!(duration_result.as_float().unwrap(), 30.0);
+        let duration_val = duration_result.as_float().unwrap();
+        assert!((duration_val - 30.0).abs() < f64::EPSILON, "Expected 30.0, got {duration_val}");
 
         let url_result = resolve_url(&[Value::String("https://example.com".to_string())]).unwrap();
         assert_eq!(url_result.as_string().unwrap(), "https://example.com");

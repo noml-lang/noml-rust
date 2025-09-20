@@ -1,0 +1,148 @@
+# Basic NOML Configuration Example
+# 
+# This example demonstrates the fundamental syntax and features of NOML,
+# making it perfect for beginners or as a reference for basic usage patterns.
+#
+# Key Features Demonstrated:
+# - Basic key-value pairs
+# - Different data types (strings, numbers, booleans)
+# - Comments and documentation
+# - Simple table structures
+# - Arrays and inline tables
+
+# Application Metadata
+# Use clear, descriptive names for configuration sections
+app_name = "my-awesome-app"
+app_version = "1.2.3"
+app_description = """
+A sample application demonstrating basic NOML configuration.
+This description can span multiple lines for detailed explanations.
+"""
+
+# Basic Configuration Values
+# NOML supports all standard data types
+debug_mode = true
+max_connections = 100
+timeout_seconds = 30.5
+api_key = "your-secret-api-key-here"
+
+# Environment-Specific Settings
+# Use environment variables for values that change between deployments
+environment = env("APP_ENV", "development")
+log_level = env("LOG_LEVEL", "info")
+
+# Server Configuration
+# Tables organize related configuration values
+[server]
+host = "localhost"
+port = 8080
+use_ssl = false
+
+# Database Configuration
+# Nested tables for hierarchical organization
+[database]
+host = env("DB_HOST", "localhost")
+port = env("DB_PORT", "5432")
+name = "myapp_db"
+username = env("DB_USER", "postgres")
+password = env("DB_PASSWORD", "postgres")
+
+# Connection Pool Settings
+[database.pool]
+min_connections = 5
+max_connections = 20
+timeout = @duration("30s")
+
+# Application Features
+# Use arrays for lists of values
+[features]
+enabled_features = [
+    "authentication",
+    "logging", 
+    "metrics",
+    "caching"
+]
+
+# Feature flags with inline tables
+feature_flags = {
+    new_ui = true,
+    experimental_api = false,
+    beta_features = env("ENABLE_BETA", false)
+}
+
+# Logging Configuration
+[logging]
+level = log_level  # Reference previously defined variable
+format = "json"
+outputs = ["console", "file"]
+
+# File logging settings
+[logging.file]
+path = "/var/log/myapp.log"
+max_size = @size("10MB")
+max_files = 5
+compress = true
+
+# External Services
+# Configuration for third-party integrations
+[services]
+
+# Redis Cache
+[services.redis]
+host = env("REDIS_HOST", "localhost")
+port = env("REDIS_PORT", "6379")
+database = 0
+timeout = @duration("5s")
+
+# Email Service
+[services.email]
+provider = "smtp"
+host = env("SMTP_HOST", "localhost")
+port = env("SMTP_PORT", "587")
+username = env("SMTP_USER", "")
+password = env("SMTP_PASS", "")
+use_tls = true
+
+# Security Settings
+[security]
+jwt_secret = env("JWT_SECRET", "change-me-in-production")
+session_timeout = @duration("24h")
+max_login_attempts = 5
+lockout_duration = @duration("15m")
+
+# Allowed CORS origins
+cors_origins = [
+    "http://localhost:3000",
+    "https://myapp.example.com"
+]
+
+# Rate Limiting
+[security.rate_limit]
+requests_per_minute = 60
+burst_limit = 10
+window_size = @duration("1m")
+
+# Monitoring and Health Checks
+[monitoring]
+enabled = true
+health_check_interval = @duration("30s")
+metrics_collection_interval = @duration("60s")
+
+# Health check endpoints
+[monitoring.health_checks]
+database = "/health/db"
+redis = "/health/redis"
+external_apis = "/health/external"
+
+# Performance Settings
+[performance]
+worker_threads = env("WORKER_THREADS", "4")
+max_request_size = @size("1MB")
+request_timeout = @duration("30s")
+keepalive_timeout = @duration("60s")
+
+# Cache settings
+[performance.cache]
+default_ttl = @duration("1h")
+max_memory = @size("256MB")
+eviction_policy = "lru"

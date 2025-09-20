@@ -312,27 +312,27 @@ impl NomlError {
     pub fn user_message(&self) -> String {
         match self {
             NomlError::Parse { message, line, column, snippet } => {
-                let mut msg = format!("Syntax error on line {}, column {}: {}", line, column, message);
+                let mut msg = format!("Syntax error on line {line}, column {column}: {message}");
                 if let Some(snippet) = snippet {
-                    msg.push_str(&format!("\n\n{}", snippet));
+                    msg.push_str(&format!("\n\n{snippet}"));
                 }
                 msg.push_str("\n\nTip: Check for missing quotes, brackets, or commas.");
                 msg
             }
             NomlError::KeyNotFound { key, available } => {
-                let mut msg = format!("The key '{}' doesn't exist.", key);
+                let mut msg = format!("The key '{key}' doesn't exist.");
                 if !available.is_empty() {
                     msg.push_str("\n\nDid you mean one of these?");
                     for suggestion in available {
-                        msg.push_str(&format!("\n  - {}", suggestion));
+                        msg.push_str(&format!("\n  - {suggestion}"));
                     }
                 }
                 msg
             }
             NomlError::EnvVar { var, has_default } => {
-                let mut msg = format!("Environment variable '{}' is not set.", var);
+                let mut msg = format!("Environment variable '{var}' is not set.");
                 if !has_default {
-                    msg.push_str(&format!("\n\nTip: Set the environment variable or provide a default value: env(\"{}\", \"default_value\")", var));
+                    msg.push_str(&format!("\n\nTip: Set the environment variable or provide a default value: env(\"{var}\", \"default_value\")"));
                 }
                 msg
             }

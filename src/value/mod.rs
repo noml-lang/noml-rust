@@ -1,8 +1,98 @@
 //! # NOML Value System
 //! 
-//! Core value types and operations for NOML data representation.
-//! This module defines the fundamental data structures that represent
-//! all possible values in a NOML document.
+//! Comprehensive value types and operations for NOML data representation.
+//! This module provides the core [`Value`] enum and all associated functionality
+//! for working with configuration data in a type-safe manner.
+//! 
+//! ## Value Types
+//! 
+//! NOML supports all standard configuration data types plus specialized types
+//! for common configuration patterns:
+//! 
+//! - **Primitives**: `null`, `bool`, `i64`, `f64`, `String`
+//! - **Collections**: `Array<Value>`, `Table<String, Value>`
+//! - **Native Types**: `Size`, `Duration`, `Binary`
+//! - **Optional**: `DateTime` (with `chrono` feature)
+//! 
+//! ## Type Conversions
+//! 
+//! The [`Value`] type provides safe conversions with comprehensive error handling:
+//! 
+//! ```rust
+//! use noml::Value;
+//! 
+//! let value = Value::string("42");
+//! 
+//! // Safe conversions with error handling
+//! let as_int = value.as_integer()?;  // Ok(42)
+//! let as_float = value.as_float()?;  // Ok(42.0)
+//! let as_bool = value.as_bool();     // Err(type mismatch)
+//! 
+//! # Ok::<(), noml::error::NomlError>(())
+//! ```
+//! 
+//! ## Smart String Conversions
+//! 
+//! String values support intelligent parsing for booleans and numbers:
+//! 
+//! ```rust
+//! use noml::Value;
+//! 
+//! // Boolean parsing
+//! assert_eq!(Value::string("true").as_bool()?, true);
+//! assert_eq!(Value::string("yes").as_bool()?, true);
+//! assert_eq!(Value::string("1").as_bool()?, true);
+//! assert_eq!(Value::string("false").as_bool()?, false);
+//! 
+//! // Numeric parsing
+//! assert_eq!(Value::string("123").as_integer()?, 123);
+//! assert_eq!(Value::string("3.14").as_float()?, 3.14);
+//! 
+//! # Ok::<(), noml::error::NomlError>(())
+//! ```
+//! 
+//! ## Native Type Support
+//! 
+//! NOML includes specialized types for common configuration values:
+//! 
+//! ```rust
+//! use noml::Value;
+//! 
+//! // File sizes with automatic parsing
+//! let size = Value::size(1024 * 1024);  // 1MB in bytes
+//! 
+//! // Time durations in seconds
+//! let timeout = Value::duration(30.0);  // 30 seconds
+//! 
+//! // Binary data
+//! let data = Value::Binary(vec![0x48, 0x65, 0x6c, 0x6c, 0x6f]);
+//! ```
+//! 
+//! ## Path-Based Access
+//! 
+//! Access nested values using dot-notation paths:
+//! 
+//! ```rust
+//! use noml::Value;
+//! use std::collections::BTreeMap;
+//! 
+//! let mut config = BTreeMap::new();
+//! let mut server = BTreeMap::new();
+//! server.insert("host".to_string(), Value::string("localhost"));
+//! server.insert("port".to_string(), Value::integer(8080));
+//! config.insert("server".to_string(), Value::table(server));
+//! 
+//! let root = Value::table(config);
+//! 
+//! // Access nested values
+//! let host = root.get("server.host").unwrap();
+//! let port = root.get("server.port").unwrap();
+//! 
+//! assert_eq!(host.as_string()?, "localhost");
+//! assert_eq!(port.as_integer()?, 8080);
+//! 
+//! # Ok::<(), noml::error::NomlError>(())
+//! ```
 
 use crate::error::{NomlError, Result};
 use serde::{Deserialize, Serialize};
@@ -154,7 +244,46 @@ impl Value {
         matches!(self, Value::Table(_))
     }
 
-    /// Try to convert to boolean
+    /// Convert value to boolean with intelligent string parsing
+    /// 
+    /// Performs type conversion to boolean with support for common
+    /// string representations. Non-zero integers are treated as true.
+    /// 
+    /// # String Parsing
+    /// 
+    /// The following string values are recognized (case-insensitive):
+    /// - **True**: `"true"`, `"yes"`, `"1"`, `"on"`
+    /// - **False**: `"false"`, `"no"`, `"0"`, `"off"`
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use noml::Value;
+    /// 
+    /// // Direct boolean values
+    /// assert_eq!(Value::Bool(true).as_bool()?, true);
+    /// assert_eq!(Value::Bool(false).as_bool()?, false);
+    /// 
+    /// // String parsing
+    /// assert_eq!(Value::string("true").as_bool()?, true);
+    /// assert_eq!(Value::string("YES").as_bool()?, true);
+    /// assert_eq!(Value::string("1").as_bool()?, true);
+    /// assert_eq!(Value::string("false").as_bool()?, false);
+    /// assert_eq!(Value::string("no").as_bool()?, false);
+    /// 
+    /// // Integer conversion
+    /// assert_eq!(Value::integer(1).as_bool()?, true);
+    /// assert_eq!(Value::integer(0).as_bool()?, false);
+    /// assert_eq!(Value::integer(-5).as_bool()?, true);
+    /// 
+    /// # Ok::<(), noml::error::NomlError>(())
+    /// ```
+    /// 
+    /// # Errors
+    /// 
+    /// Returns [`NomlError`] for:
+    /// - Unrecognized string values
+    /// - Incompatible types (arrays, tables, etc.)
     pub fn as_bool(&self) -> Result<bool> {
         match self {
             Value::Bool(b) => Ok(*b),
@@ -331,8 +460,7 @@ impl Value {
             // Ensure intermediate values are tables
             if !current.is_table() {
                 return Err(NomlError::validation(format!(
-                    "Cannot set nested key: '{}' is not a table",
-                    segment
+                    "Cannot set nested key: '{segment}' is not a table"
                 )));
             }
         }
@@ -406,17 +534,17 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Null => write!(f, "null"),
-            Value::Bool(b) => write!(f, "{}", b),
-            Value::Integer(i) => write!(f, "{}", i),
-            Value::Float(fl) => write!(f, "{}", fl),
-            Value::String(s) => write!(f, "\"{}\"", s),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Integer(i) => write!(f, "{i}"),
+            Value::Float(fl) => write!(f, "{fl}"),
+            Value::String(s) => write!(f, "\"{s}\""),
             Value::Array(arr) => {
                 write!(f, "[")?;
                 for (i, item) in arr.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", item)?;
+                    write!(f, "{item}")?;
                 }
                 write!(f, "]")
             }
@@ -426,7 +554,7 @@ impl fmt::Display for Value {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", key, value)?;
+                    write!(f, "{key}: {value}")?;
                 }
                 write!(f, "}}")
             }
@@ -455,7 +583,7 @@ fn format_size(bytes: u64) -> String {
     }
     
     if unit_index == 0 {
-        format!("{}B", bytes)
+        format!("{bytes}B")
     } else {
         format!("{:.1}{}", size, UNITS[unit_index])
     }
@@ -466,7 +594,7 @@ fn format_duration(seconds: f64) -> String {
     if seconds < 1.0 {
         format!("{}ms", (seconds * 1000.0) as u64)
     } else if seconds < 60.0 {
-        format!("{:.1}s", seconds)
+        format!("{seconds:.1}s")
     } else if seconds < 3600.0 {
         format!("{:.1}m", seconds / 60.0)
     } else if seconds < 86400.0 {
@@ -543,7 +671,7 @@ mod tests {
 
         let bool_val = Value::bool(true);
         assert!(bool_val.is_bool());
-        assert_eq!(bool_val.as_bool().unwrap(), true);
+        assert!(bool_val.as_bool().unwrap());
 
         let int_val = Value::integer(42);
         assert!(int_val.is_number());
@@ -584,13 +712,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn type_conversions() {
         // String to bool
         let true_val = Value::string("true");
-        assert_eq!(true_val.as_bool().unwrap(), true);
+        assert!(true_val.as_bool().unwrap());
 
         let false_val = Value::string("false");
-        assert_eq!(false_val.as_bool().unwrap(), false);
+        assert!(!false_val.as_bool().unwrap());
 
         // Float to int (exact)
         let float_val = Value::float(42.0);
@@ -614,6 +743,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn from_trait_implementations() {
         let _: Value = true.into();
         let _: Value = 42i32.into();

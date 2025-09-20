@@ -317,8 +317,7 @@ impl AstNode {
                     "size" => self.handle_size_function(args),
                     "duration" => self.handle_duration_function(args),
                     _ => Err(NomlError::validation(format!(
-                        "Unknown function: {}",
-                        name
+                        "Unknown function: {name}"
                     ))),
                 }
             }
@@ -474,8 +473,7 @@ impl AstNode {
         parse_size(&size_str)
             .map(Value::Size)
             .ok_or_else(|| NomlError::validation(format!(
-                "Invalid size format: {}",
-                size_str
+                "Invalid size format: {size_str}"
             )))
     }
 
@@ -499,8 +497,7 @@ impl AstNode {
         parse_duration(&duration_str)
             .map(Value::Duration)
             .ok_or_else(|| NomlError::validation(format!(
-                "Invalid duration format: {}",
-                duration_str
+                "Invalid duration format: {duration_str}"
             )))
     }
 
@@ -511,8 +508,7 @@ impl AstNode {
             "duration" => self.handle_duration_function(args),
             // "date" => self.handle_date_function(args), // Disabled: chrono feature not available
             _ => Err(NomlError::validation(format!(
-                "Unknown native type: @{}",
-                type_name
+                "Unknown native type: @{type_name}"
             ))),
         }
     }

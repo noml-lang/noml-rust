@@ -481,7 +481,7 @@ impl<'a> Lexer<'a> {
                     }
                     other => {
                         return Err(NomlError::parse(
-                            format!("Invalid escape sequence: \\{}", other),
+                            format!("Invalid escape sequence: \\{other}"),
                             self.line,
                             self.column,
                         ));
@@ -615,7 +615,7 @@ impl<'a> Lexer<'a> {
             let ch = self.current_char();
             let is_valid_digit = match base {
                 2 => ch == '0' || ch == '1',
-                8 => ch >= '0' && ch <= '7',
+                8 => ('0'..='7').contains(&ch),
                 10 => ch.is_ascii_digit() || ch == '.' || ch == 'e' || ch == 'E',
                 16 => ch.is_ascii_hexdigit(),
                 _ => false,
@@ -649,7 +649,7 @@ impl<'a> Lexer<'a> {
         if is_float {
             let value = clean_text.parse::<f64>()
                 .map_err(|_| NomlError::parse(
-                    format!("Invalid float literal: {}", raw_text),
+                    format!("Invalid float literal: {raw_text}"),
                     self.token_start_line,
                     self.token_start_column,
                 ))?;
@@ -672,7 +672,7 @@ impl<'a> Lexer<'a> {
                 
                 let mut result = i64::from_str_radix(digits, base)
                     .map_err(|_| NomlError::parse(
-                        format!("Invalid integer literal: {}", raw_text),
+                        format!("Invalid integer literal: {raw_text}"),
                         self.token_start_line,
                         self.token_start_column,
                     ))?;
@@ -685,7 +685,7 @@ impl<'a> Lexer<'a> {
             };
             
             let value = value.map_err(|_| NomlError::parse(
-                format!("Invalid integer literal: {}", raw_text),
+                format!("Invalid integer literal: {raw_text}"),
                 self.token_start_line,
                 self.token_start_column,
             ))?;
@@ -733,12 +733,12 @@ impl<'a> Lexer<'a> {
 impl fmt::Display for TokenKind<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TokenKind::String { value, .. } => write!(f, "\"{}\"", value),
-            TokenKind::Integer { value, .. } => write!(f, "{}", value),
-            TokenKind::Float { value, .. } => write!(f, "{}", value),
-            TokenKind::Bool(b) => write!(f, "{}", b),
+            TokenKind::String { value, .. } => write!(f, "\"{value}\""),
+            TokenKind::Integer { value, .. } => write!(f, "{value}"),
+            TokenKind::Float { value, .. } => write!(f, "{value}"),
+            TokenKind::Bool(b) => write!(f, "{b}"),
             TokenKind::Null => write!(f, "null"),
-            TokenKind::Identifier(name) => write!(f, "{}", name),
+            TokenKind::Identifier(name) => write!(f, "{name}"),
             TokenKind::EnvFunc => write!(f, "env"),
             TokenKind::Include => write!(f, "include"),
             TokenKind::Equals => write!(f, "="),
@@ -753,11 +753,11 @@ impl fmt::Display for TokenKind<'_> {
             TokenKind::InterpolationStart => write!(f, "${{"),
             TokenKind::InterpolationEnd => write!(f, "}}"),
             TokenKind::At => write!(f, "@"),
-            TokenKind::Comment { text } => write!(f, "# {}", text),
+            TokenKind::Comment { text } => write!(f, "# {text}"),
             TokenKind::Whitespace => write!(f, "<ws>"),
             TokenKind::Newline => write!(f, "<nl>"),
             TokenKind::Eof => write!(f, "<eof>"),
-            TokenKind::Invalid(ch) => write!(f, "<invalid:{}>", ch),
+            TokenKind::Invalid(ch) => write!(f, "<invalid:{ch}>"),
         }
     }
 }
@@ -788,12 +788,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn numbers() {
         let input = "42 3.14 -10 0xFF 0o755 0b1010";
         let tokens = tokenize_string(input).unwrap();
         
         // Should have integer, float, negative integer, hex, octal, binary + EOF
         assert!(matches!(tokens[0].kind, TokenKind::Integer { value: 42, .. }));
+        let _ = matches!(tokens[1].kind, TokenKind::Float { value, .. } if (value - 3.14).abs() < f64::EPSILON);
         assert!(matches!(tokens[1].kind, TokenKind::Float { value, .. } if (value - 3.14).abs() < f64::EPSILON));
         assert!(matches!(tokens[2].kind, TokenKind::Integer { value: -10, .. }));
         assert!(matches!(tokens[3].kind, TokenKind::Integer { value: 255, .. })); // 0xFF

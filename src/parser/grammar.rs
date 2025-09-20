@@ -37,6 +37,15 @@ pub fn parse_file(path: &Path) -> Result<Document> {
     parse_string(&source, Some(path.to_string_lossy().to_string()))
 }
 
+/// Parse NOML from a file asynchronously
+#[cfg(feature = "async")]
+pub async fn parse_file_async(path: &std::path::Path) -> Result<Document> {
+    let source = tokio::fs::read_to_string(path).await
+        .map_err(|e| NomlError::io(path.to_string_lossy().to_string(), e))?;
+    
+    parse_string(&source, Some(path.to_string_lossy().to_string()))
+}
+
 /// NOML parser implementation
 pub struct NomlParser<'a> {
     /// Input tokens
@@ -103,7 +112,7 @@ impl<'a> NomlParser<'a> {
         Ok(AstNode::with_comments(ast_value, span, comments))
     }
 
-    /// Parse a table header like [section] or [section.subsection]
+    /// Parse a table header like `[section]` or `[section.subsection]`
     fn parse_table_header(&mut self, entries: &mut Vec<TableEntry>) -> Result<()> {
         let start_span = self.current_span();
         let mut comments = Comments::new();
@@ -896,7 +905,7 @@ data = null
 
         assert_eq!(value.get("name").unwrap().as_string().unwrap(), "test");
         assert_eq!(value.get("version").unwrap().as_float().unwrap(), 1.0);
-        assert_eq!(value.get("debug").unwrap().as_bool().unwrap(), true);
+        assert!(value.get("debug").unwrap().as_bool().unwrap());
         assert!(value.get("data").unwrap().is_null());
     }
 
@@ -922,7 +931,7 @@ mixed = [1, "two", true, null]
         assert_eq!(mixed.len(), 4);
         assert_eq!(mixed[0].as_integer().unwrap(), 1);
         assert_eq!(mixed[1].as_string().unwrap(), "two");
-        assert_eq!(mixed[2].as_bool().unwrap(), true);
+        assert!(mixed[2].as_bool().unwrap());
         assert!(mixed[3].is_null());
     }
 

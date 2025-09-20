@@ -1,71 +1,183 @@
-[package] 
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+#╔═════════════════════════════════════════╗
+#║ ┌───¸ ┌──┐┌──────┐┌──────────┐┌──┐      ║
+#║ │    ╲│  ││  ┌┐  ││          ││  │      ║ 
+#║ │  ╷  ╲  ││  ││  ││  ┌┐  ┌┐  ││  │      ║ 
+#║ │  │╲    ││  ││  ││  ││  ││  ││  │      ║ 
+#║ │  │ ╲   ││  └┘  ││  │└──┘│  ││  ┗────┐ ║ 
+#║ └──┘  `──┘└──────┘└──┘    └──┘└───────┘ ║ 
+#╚═════════════════════════════════════════╝
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[package]
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
 name = "noml"
 version = "0.3.0"
-edition = "2021"
-readme  = "README.md"
+publish = true
 license = "Apache-2.0"
+readme  = "README.md"
+rust-version = "1.65"
+edition = "2021"
 
-documentation = "https://docs.rs/noml"
-repository    = "https://github.com/noml-lang/noml-rust"
-homepage      = "https://github.com/noml-lang/noml-rust"
-
+# Description
+#══════════════════════════════════════════⬡
 description = "A blazing-fast configuration library for NOML (Nested Object Markup Language) with advanced features including variable interpolation, imports, schema validation, and comment preservation"
+
+# Links
+#══════════════════════════════════════════⬡
+homepage      = "https://github.com/noml-lang/noml-rust" # Homepage
+repository    = "https://github.com/noml-lang/noml-rust" # Repository
+documentation = "https://docs.rs/noml"                   # Documentation
+
+# KEYWORDS (MIN 5, MAX 10)
 keywords = [
-    "noml", 
-    "config", 
-    "parser", 
-    "markup",
-    "toml",
-]
+#══════════════════════════════════════════⬡
+"noml", 
+"config", 
+"parser", 
+"markup",
+"toml",
+]#═════════════════════════════════════════⬡
+
+# CATEGORIES (Max 5)
 categories = [
-    "config",
-    "parsing", 
-    "data-structures",
-    "development-tools"
-]
+#══════════════════════════════════════════⬡
+"config",
+"parsing", 
+"data-structures",
+"development-tools"
+]#═════════════════════════════════════════⬡
+
+# EXCLUDE (Excludes from crates.io)
 exclude = [
-    ".github/",
-    "benches/",
-    "docs/",
-    "dev/",
-]
+#══════════════════════════════════════════⬡
+".github/",  # GitHub metadata 
+"benches/",  # Benchmarking code
+"docs/",     # Documentation
+"dev/",      # Development utilities
+]#═════════════════════════════════════════⬡
 
+# AUTHORS (At least 1)
 authors = [
+#══════════════════════════════════════════⬡
     "James Gober <code@jamesgober.dev>"
-]
+]#═════════════════════════════════════════⬡
 
-[dependencies]
-# Ordered map for preserving key order in tables
-indexmap = "2.0"
-serde = { version = "1.0.219", features = ["derive"] }
-tempfile = "3.20.0"
-# Error handling
-thiserror = "1.0"
-chrono = { version = "0.4", optional = true }
 
-[dev-dependencies]
-# Testing framework
-tokio-test = "0.4"
-# Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
 
-[features]
-default = []
-chrono = ["dep:chrono"]
 
-[[bench]]
+
+# FEATURES
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[features]#░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+default = []                           # No default features
+chrono  = ["dep:chrono"]               # Choice of datetime library
+async   = ["dep:tokio", "dep:reqwest"] # Enable async features
+
+
+
+
+
+# BENCHMARKS
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[[bench]]#░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 name = "parser_benchmarks"
 harness = false
 
-[profile.release]
-# Maximum optimization for legendary performance
-opt-level = 3
+
+
+
+# EXAMPLES
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[[example]]#░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+name = "demo"
+path = "examples/demo.rs"
+
+[[example]]#░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+name = "async_demo"
+path = "examples/async_demo.rs"
+required-features = ["async"]
+
+[[example]]#░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+name = "format_preservation_demo"
+path = "examples/format_preservation_demo.rs"
+
+
+
+
+
+# PROFILE [RELEASE]
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[profile.release]#░░░░░░░░░░░░░░░░░░░░░░░░░░
+opt-level = 3 # Maximum optimization for legendary performance
 lto = true
 codegen-units = 1
 panic = "abort"
 
-[profile.bench]
-# Optimized for accurate benchmarking
-opt-level = 3
+
+
+# PROFILE [BENCH]
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[profile.bench]#░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+opt-level = 3 # Optimized for accurate benchmarking
 lto = true
 codegen-units = 1
+
+
+
+
+
+# DEPENDENCIES
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[dependencies]#░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
+# Error handling
+#══════════════════════════════════════════⬡
+thiserror = "1.0"
+chrono = { version = "0.4", optional = true, features = ["serde"] }
+
+# Async runtime (optional)
+#══════════════════════════════════════════⬡
+tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }
+
+# Ordered map for preserving key order in tables
+#══════════════════════════════════════════⬡
+indexmap = "2.0"
+
+# Serialization / Deserialization
+#══════════════════════════════════════════⬡
+serde = { version = "1.0.219", features = ["derive"] }
+
+# Temporary files for testing
+#══════════════════════════════════════════⬡
+tempfile = "3.20.0"
+
+# HTTP client for remote includes (optional)
+#══════════════════════════════════════════⬡
+reqwest = { version = "0.11", optional = true }
+
+
+
+
+# DEV DEPENDENCIES
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+[dev-dependencies]#░░░░░░░░░░░░░░░░░░░░░░░░░
+
+# Testing framework
+#══════════════════════════════════════════⬡
+tokio-test = "0.4"
+
+# Async test runner
+#══════════════════════════════════════════⬡
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+
+# Benchmarking
+#══════════════════════════════════════════⬡
+criterion = { version = "0.5", features = ["html_reports"] }
+
+
+
+
+
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
+#░ Language Compatibility: NOML v0.6.x
+#░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░

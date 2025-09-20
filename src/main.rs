@@ -56,7 +56,7 @@ fn main() {
         }
         
         _ => {
-            eprintln!("Error: unknown command '{}'", command);
+            eprintln!("Error: unknown command '{command}'");
             eprintln!("Run with no arguments to see usage information.");
             process::exit(1);
         }
@@ -67,17 +67,17 @@ fn validate_file(file_path: &str) {
     let content = match fs::read_to_string(file_path) {
         Ok(content) => content,
         Err(err) => {
-            eprintln!("Error reading file '{}': {}", file_path, err);
+            eprintln!("Error reading file '{file_path}': {err}");
             process::exit(1);
         }
     };
     
     match noml::validate(&content) {
         Ok(()) => {
-            println!("✓ {} is valid NOML", file_path);
+            println!("✓ {file_path} is valid NOML");
         }
         Err(err) => {
-            eprintln!("✗ Validation failed for '{}':", file_path);
+            eprintln!("✗ Validation failed for '{file_path}':");
             eprintln!("{}", err.user_message());
             process::exit(1);
         }
@@ -88,7 +88,7 @@ fn parse_file(file_path: &str) {
     let content = match fs::read_to_string(file_path) {
         Ok(content) => content,
         Err(err) => {
-            eprintln!("Error reading file '{}': {}", file_path, err);
+            eprintln!("Error reading file '{file_path}': {err}");
             process::exit(1);
         }
     };
@@ -96,7 +96,7 @@ fn parse_file(file_path: &str) {
     let document = match noml::parse(&content) {
         Ok(doc) => doc,
         Err(err) => {
-            eprintln!("Parse error in '{}':", file_path);
+            eprintln!("Parse error in '{file_path}':");
             eprintln!("{}", err.user_message());
             process::exit(1);
         }
@@ -104,7 +104,7 @@ fn parse_file(file_path: &str) {
 
 let value = document;
 
-println!("Successfully parsed '{}':", file_path);
+println!("Successfully parsed '{file_path}':");
 println!();
 println!("Structure:");
 display_value(&value, 0);
@@ -114,30 +114,32 @@ fn display_value(value: &noml::Value, indent: usize) {
     let indent_str = "  ".repeat(indent);
     
     match value {
-        noml::Value::Null => println!("{}null", indent_str),
-        noml::Value::Bool(b) => println!("{}{}", indent_str, b),
-        noml::Value::Integer(i) => println!("{}{}", indent_str, i),
-        noml::Value::Float(f) => println!("{}{}", indent_str, f),
-        noml::Value::String(s) => println!("{}\"{}\"", indent_str, s),
-        noml::Value::Size(bytes) => println!("{}{}B", indent_str, bytes),
-        noml::Value::Duration(secs) => println!("{}{}s", indent_str, secs),
+        noml::Value::Null => println!("{indent_str}null"),
+        noml::Value::Bool(b) => println!("{indent_str}{b}"),
+        noml::Value::Integer(i) => println!("{indent_str}{i}"),
+        noml::Value::Float(f) => println!("{indent_str}{f}"),
+        noml::Value::String(s) => println!("{indent_str}\"{s}\""),
+        noml::Value::Size(bytes) => println!("{indent_str}{bytes}B"),
+        noml::Value::Duration(secs) => println!("{indent_str}{secs}s"),
         noml::Value::Binary(data) => println!("{}<{} bytes>", indent_str, data.len()),
         noml::Value::Array(arr) => {
-            println!("{}[", indent_str);
+            println!("{indent_str}[");
             for (i, item) in arr.iter().enumerate() {
-                print!("{}  [{}] ", indent_str, i);
+                print!("{indent_str}  [{i}] ");
                 display_value(item, indent + 1);
             }
-            println!("{}]", indent_str);
+            println!("{indent_str}]");
         }
         noml::Value::Table(table) => {
-            println!("{}{{", indent_str);
+            println!("{indent_str}{{");
             for (key, val) in table {
-                print!("{}  {}: ", indent_str, key);
+                print!("{indent_str}  {key}: ");
                 display_value(val, indent + 1);
             }
-            println!("{}}}", indent_str);
+            println!("{indent_str}}}");
         }
+        #[cfg(feature = "chrono")]
+        noml::Value::DateTime(dt) => println!("{}{}", indent_str, dt.format("%Y-%m-%d %H:%M:%S UTC")),
     }
 }
 
