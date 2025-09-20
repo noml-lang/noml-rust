@@ -197,6 +197,7 @@ impl Value {
     }
 
     /// Get the type name of this value
+    #[inline]
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Null => "null",
@@ -215,6 +216,7 @@ impl Value {
     }
 
     /// Check if this value is null
+    #[inline]
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)
     }
@@ -240,6 +242,7 @@ impl Value {
     }
 
     /// Check if this value is a table
+    #[inline]
     pub fn is_table(&self) -> bool {
         matches!(self, Value::Table(_))
     }
@@ -284,17 +287,23 @@ impl Value {
     /// Returns [`NomlError`] for:
     /// - Unrecognized string values
     /// - Incompatible types (arrays, tables, etc.)
+    #[inline]
     pub fn as_bool(&self) -> Result<bool> {
         match self {
             Value::Bool(b) => Ok(*b),
-            Value::String(s) => match s.to_lowercase().as_str() {
-                "true" | "yes" | "1" | "on" => Ok(true),
-                "false" | "no" | "0" | "off" => Ok(false),
-                _ => Err(NomlError::type_error(s, "boolean", self.type_name())),
+            Value::String(s) => {
+                // Case-insensitive comparison without allocation
+                if s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("yes") || s == "1" || s.eq_ignore_ascii_case("on") {
+                    Ok(true)
+                } else if s.eq_ignore_ascii_case("false") || s.eq_ignore_ascii_case("no") || s == "0" || s.eq_ignore_ascii_case("off") {
+                    Ok(false)
+                } else {
+                    Err(NomlError::type_error(s, "boolean", self.type_name()))
+                }
             },
             Value::Integer(i) => Ok(*i != 0),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "boolean",
                 self.type_name(),
             )),
@@ -302,6 +311,7 @@ impl Value {
     }
 
     /// Try to convert to integer
+    #[inline]
     pub fn as_integer(&self) -> Result<i64> {
         match self {
             Value::Integer(i) => Ok(*i),
@@ -317,7 +327,7 @@ impl Value {
                 .map_err(|_| NomlError::type_error(s, "integer", "string")),
             Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "integer",
                 self.type_name(),
             )),
@@ -325,6 +335,7 @@ impl Value {
     }
 
     /// Try to convert to float
+    #[inline]
     pub fn as_float(&self) -> Result<f64> {
         match self {
             Value::Float(f) => Ok(*f),
@@ -333,7 +344,7 @@ impl Value {
                 .parse::<f64>()
                 .map_err(|_| NomlError::type_error(s, "float", "string")),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "float",
                 self.type_name(),
             )),
@@ -341,11 +352,12 @@ impl Value {
     }
 
     /// Try to convert to string
+    #[inline]
     pub fn as_string(&self) -> Result<&str> {
         match self {
             Value::String(s) => Ok(s),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "string",
                 self.type_name(),
             )),
@@ -365,7 +377,7 @@ impl Value {
         match self {
             Value::Array(arr) => Ok(arr),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "array",
                 self.type_name(),
             )),
@@ -377,7 +389,7 @@ impl Value {
         match self {
             Value::Array(arr) => Ok(arr),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "array",
                 self.type_name(),
             )),
@@ -389,7 +401,7 @@ impl Value {
         match self {
             Value::Table(table) => Ok(table),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "table",
                 self.type_name(),
             )),
@@ -401,7 +413,7 @@ impl Value {
         match self {
             Value::Table(table) => Ok(table),
             _ => Err(NomlError::type_error(
-                self.to_string(),
+                format!("<{}>", self.type_name()),
                 "table",
                 self.type_name(),
             )),
@@ -457,7 +469,8 @@ impl Value {
                 table.insert(segment.to_string(), Value::empty_table());
             }
 
-            current = table.get_mut(*segment).unwrap();
+            current = table.get_mut(*segment)
+                .ok_or_else(|| NomlError::validation(format!("Failed to access segment '{segment}'")))?;
 
             // Ensure intermediate values are tables
             if !current.is_table() {
@@ -468,7 +481,8 @@ impl Value {
         }
 
         // Set the final value
-        let final_key = segments.last().unwrap();
+        let final_key = segments.last()
+            .ok_or_else(|| NomlError::validation("Empty segments list"))?;
         let table = current.as_table_mut()?;
         table.insert(final_key.to_string(), value);
 
@@ -498,7 +512,8 @@ impl Value {
         }
 
         // Remove from parent
-        let final_key = segments.last().unwrap();
+        let final_key = segments.last()
+            .ok_or_else(|| NomlError::validation("Empty segments list"))?;
         let table = current.as_table_mut()?;
         Ok(table.remove(*final_key))
     }
