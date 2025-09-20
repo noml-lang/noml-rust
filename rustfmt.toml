@@ -1,0 +1,23 @@
+# rustfmt configuration for NOML
+# https://rust-lang.github.io/rustfmt/
+
+# Basic formatting (stable features only)
+edition = "2021"
+hard_tabs = false
+tab_spaces = 4
+max_width = 100
+use_small_heuristics = "Default"
+
+# Function formatting
+fn_params_layout = "Tall"
+
+# Arrays and other formatting
+array_width = 60
+chain_width = 60
+single_line_if_else_max_width = 50
+
+# Misc stable options
+use_field_init_shorthand = true
+use_try_shorthand = true
+force_explicit_abi = true
+newline_style = "Unix"
