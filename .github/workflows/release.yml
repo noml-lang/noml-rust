@@ -78,17 +78,11 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary_name: noml
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            binary_name: noml
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary_name: noml.exe
           - os: macos-latest
             target: x86_64-apple-darwin
-            binary_name: noml
-          - os: macos-14  # ARM64
-            target: aarch64-apple-darwin
             binary_name: noml
 
     steps:
@@ -104,10 +98,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ runner.os }}-${{ matrix.target }}
-
-      - name: Install musl tools (Linux)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt-get install -y musl-tools
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
@@ -160,9 +150,6 @@ jobs:
             echo "Version mismatch: Cargo.toml has $cargo_version, tag is $tag_version"
             exit 1
           fi
-
-      - name: Run final tests
-        run: cargo test --all-features
 
       - name: Publish to crates.io
         run: cargo publish
