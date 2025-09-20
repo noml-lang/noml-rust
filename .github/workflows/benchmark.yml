@@ -24,32 +24,30 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run benchmarks
-        run: cargo bench --all-features -- --output-format json | tee benchmark_results.json
+        run: |
+          # Run benchmarks and check they work, but don't expect JSON output for now
+          cargo bench --all-features
 
-      - name: Store benchmark result (on main)
-        if: github.ref == 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          tool: 'cargo'
-          output-file-path: benchmark_results.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
-          comment-on-alert: true
-          alert-threshold: '120%'
-          fail-on-alert: false  # Don't fail CI on performance regression
-          benchmark-data-dir-path: 'benchmarks'
+      # Temporarily disable automatic benchmark tracking until we fix the JSON output
+      # - name: Store benchmark result (main branch)
+      #   if: github.ref == 'refs/heads/main'
+      #   uses: benchmark-action/github-action-benchmark@v1
+      #   with:
+      #     tool: 'cargo'
+      #     output-file-path: benchmark_results.json
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     auto-push: true
+      #     comment-on-alert: true
+      #     alert-threshold: '120%'
+      #     fail-on-alert: false  # Don't fail CI on performance regression
+      #     benchmark-data-dir-path: 'benchmarks'
 
-      - name: Compare with main (on PR)
-        if: github.event_name == 'pull_request'
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          tool: 'cargo'
-          output-file-path: benchmark_results.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-on-alert: true
-          alert-threshold: '120%'
-          fail-on-alert: false
-          benchmark-data-dir-path: 'benchmarks'
+      # - name: Compare with main (on PR)
+      #   if: github.event_name == 'pull_request'
+      #   uses: benchmark-action/github-action-benchmark@v1
+      #   with:
+      #     tool: 'cargo'
+      #     output-file-path: benchmark_results.json
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
