@@ -29,10 +29,8 @@ fn main() {
 
     match command.as_str() {
         "version" => {
-            // Print version information using noml crate's version function if available, or hardcode as fallback
-            println!("NOML CLI Tool");
-            // println!("Feature: serde enabled");
-            // println!("Feature: chrono enabled");
+            println!("NOML v{}", env!("CARGO_PKG_VERSION"));
+            println!("High-performance configuration language with dynamic features");
         }
 
         "validate" => {
