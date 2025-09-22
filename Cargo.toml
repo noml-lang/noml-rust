@@ -137,7 +137,7 @@ indexmap = "2.0"
 
 # Serialization / Deserialization
 #══════════════════════════════════════════⬡
-serde = { version = "1.0.219", features = ["derive"] }
+serde = { version = "1.0.226", features = ["derive"] }
 
 # Temporary files for testing
 #══════════════════════════════════════════⬡
