@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-08
+
+### Security
+- **reqwest 0.11 to 0.12**: The optional `async` feature (HTTP includes) depended on `reqwest` 0.11, which pulls in `hyper` 0.14 and `h2` 0.3.27. `h2` 0.3 is affected by RUSTSEC-2026-0258 (unbounded empty DATA frames), which is fixed only in `h2` 0.4.16 and later. The dependency is now `reqwest` 0.12 (`hyper` 1, `h2` 0.4.20). `reqwest` is only used internally by the resolver, so the public API is unchanged.
+- **Removed `rustls-pemfile`**: The unmaintained `rustls-pemfile` 1.0.4 (RUSTSEC-2025-0134) came in through `reqwest` 0.11 and is no longer in the dependency tree.
+- **Cargo.lock**: Updated `bytes` 1.10.1 to 1.12.1 (RUSTSEC-2026-0007) and `crossbeam-epoch` 0.9.18 to 0.9.21 (RUSTSEC-2026-0204, via the `criterion` dev-dependency).
+
 ## [0.9.0] - 2025-09-20
 
 ### Performance 🚀
@@ -199,7 +206,8 @@
 
 <!-- FOOTER
 ###################################################-->
-[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.9.0...HEAD
+[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/noml-lang/noml-rust/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/noml-lang/noml-rust/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/noml-lang/noml-rust/compare/v0.4.0...v0.8.0
 [0.4.0]: https://github.com/noml-lang/noml-rust/compare/v0.3.0...v0.4.0
