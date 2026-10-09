@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AstValue","CommentStyle","FormatStyle","LineEnding","StringStyle"],"struct":["AstNode","BracketSpacing","Comment","Comments","Document","EqualsSpacing","FormatMetadata","Indentation","Key","KeySegment","Span","TableEntry"]};

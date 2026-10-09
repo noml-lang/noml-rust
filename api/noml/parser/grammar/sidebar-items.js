@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["parse_file","parse_file_async","parse_string"],"struct":["NomlParser"]};
