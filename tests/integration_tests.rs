@@ -354,49 +354,51 @@ app_name = "my-app"
 version = "1.0.0"
 environment = "production"
 
-# String interpolation - simplified for testing
-greeting = "Hello from my-app"
-version_string = "Version: 1.0.0"
-full_description = "App my-app v1.0.0 running in production"
+greeting = "Hello from ${app_name}"
+version_string = "Version: ${version}"
+full_description = "App ${app_name} v${version} running in ${environment}"
 
-# Nested context
 [database]
 host = "db-server"
 port = 5432
-connection_string = "postgresql://db-server:5432/mydb"
+connection_string = "postgresql://${database.host}:${database.port}/mydb"
 "#;
 
-    // Use resolver with context to enable variable interpolation
-    let document = parse_raw(source).expect("Should parse successfully");
-    let mut resolver = Resolver::new();
+    let config = parse(source).expect("Should parse and resolve");
 
-    // Set up variables for interpolation
-    resolver.set_variable("app_name".to_string(), Value::String("my-app".to_string()));
-    resolver.set_variable("version".to_string(), Value::String("1.0.0".to_string()));
-    resolver.set_variable(
-        "environment".to_string(),
-        Value::String("production".to_string()),
+    assert_eq!(
+        config.get("greeting").unwrap().as_string().unwrap(),
+        "Hello from my-app"
     );
-    resolver.set_variable("host".to_string(), Value::String("db-server".to_string()));
-    resolver.set_variable("port".to_string(), Value::Integer(5432));
+    assert_eq!(
+        config.get("version_string").unwrap().as_string().unwrap(),
+        "Version: 1.0.0"
+    );
+    assert_eq!(
+        config.get("full_description").unwrap().as_string().unwrap(),
+        "App my-app v1.0.0 running in production"
+    );
+    assert_eq!(
+        config
+            .get("database.connection_string")
+            .unwrap()
+            .as_string()
+            .unwrap(),
+        "postgresql://db-server:5432/mydb"
+    );
 
+    // Variables set on the resolver fill in paths the document does not define
+    let document = parse_raw(r#"banner = "${app_name} (${build})""#).unwrap();
+    let mut resolver = Resolver::new();
+    resolver.set_variable("app_name".to_string(), Value::String("my-app".to_string()));
+    resolver.set_variable("build".to_string(), Value::Integer(42));
     let config = resolver
         .resolve_with_context(&document)
         .expect("Should resolve successfully");
-
-    // Test basic interpolation
     assert_eq!(
-        config.get("app_name").unwrap().as_string().unwrap(),
-        "my-app"
+        config.get("banner").unwrap().as_string().unwrap(),
+        "my-app (42)"
     );
-    assert_eq!(config.get("version").unwrap().as_string().unwrap(), "1.0.0");
-    assert_eq!(
-        config.get("environment").unwrap().as_string().unwrap(),
-        "production"
-    );
-
-    // Note: String interpolation is implemented but may not work perfectly in this test
-    // due to the resolver implementation details. This test verifies the structure is correct.
 }
 
 #[test]

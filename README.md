@@ -84,27 +84,33 @@ let config = parse(r#"
 "#)?;
 
 // Fast path-based access
-let app_name = config.get("app_name")?.as_string()?;
-let port = config.get("server.port")?.as_integer()?;
-let timeout = config.get("server.timeout")?.as_duration()?;
+let app_name = config.get("app_name").unwrap().as_string()?;
+let port = config.get("server.port").unwrap().as_integer()?;     // "8080" from env() converts
+let timeout = config.get("server.timeout").unwrap().as_float()?; // 30.0 seconds
 ```
 
-### **Format Preservation** 
+### **Format Preservation**
 
 ```rust
-use noml::{parse_preserving, modify_preserving, save_preserving};
+use noml::parser::ast::AstValue;
+use noml::{modify_preserving, parse_preserving_from_file, save_preserving};
 
-// Parse with complete format preservation
-let mut doc = parse_preserving_from_file("config.noml")?;
+// Parse with comments, key order and quote styles kept
+let doc = parse_preserving_from_file("config.noml")?;
 
-// Modify values while preserving formatting
-doc = modify_preserving(doc, |config| {
-    config.set("server.port", 9090)?;
-    config.set("debug", true)?;
+// Change a value in the syntax tree
+let doc = modify_preserving(doc, |root| {
+    if let AstValue::Table { entries, .. } = &mut root.value {
+        for entry in entries.iter_mut() {
+            if entry.key.to_string() == "port" {
+                entry.value.value = AstValue::Integer { value: 9090, raw: "9090".into() };
+            }
+        }
+    }
     Ok(())
 })?;
 
-// Save with perfect format fidelity
+// Write it back; everything you did not change keeps its comments and style
 save_preserving(&doc, "config.noml")?;
 ```
 
@@ -115,15 +121,15 @@ use noml::Config;
 
 let mut config = Config::from_file("app.noml")?;
 
-// Merge multiple configs
-config.merge_from_file("local-overrides.noml")?;
+// Merge another config on top (its values win)
+let overrides = Config::from_file("local-overrides.noml")?;
+config.merge(&overrides)?;
 
-// Type-safe access with defaults
-let port: u16 = config.get_or("server.port", 8080)?;
-let debug: bool = config.get_or("debug", false)?;
+// Read with a fallback that is stored in the config
+let port = config.get_or_insert("server.port", 8080)?.as_integer()?;
 
 // Dynamic updates
-config.set("last_updated", chrono::Utc::now())?;
+config.set("last_updated", "2026-10-09T12:00:00Z")?;
 config.save_to_file("app.noml")?;
 ```
 
@@ -145,12 +151,37 @@ server_ip = @ip("192.168.1.100")
 ### **String Interpolation & File Includes**
 ```noml
 app_name = "my-service"
-log_file = "/var/log/${app_name}.log"
+port = 8080
+log_file = "/var/log/${app_name}.log"   # "/var/log/my-service.log"
+health = "http://localhost:${port}/up"  # numbers are written as text
+listen_port = ${port}                   # bare: copies the value, stays an integer
+
+[database]
+name = "${app_name}_db"
+url = "postgres://localhost/${database.name}"
 
 # Include other configuration files
-database = include "database.noml"
-secrets = include "secrets.noml" 
+database_settings = include "database.noml"
+secrets = include "secrets.noml"
 ```
+
+How `${...}` works:
+
+- A path is a dotted key from the document root: `${app_name}`, `${database.name}`,
+  `${servers.0.host}` (or `${servers[0].host}`) for array elements. Quote keys that
+  contain dots: `${"dotted.key".x}`.
+- Inside a double-quoted string (`"..."` or `"""..."""`) the value is converted to text.
+  Tables and arrays can't be converted; use a bare `${table}` to copy them.
+- A bare `${path}` copies the value with its type, including whole tables.
+- References can point forward, chain, and appear in `env()` defaults and native type
+  arguments: `@size("${max_mb}MB")`.
+- Single-quoted (`'...'`, `'''...'''`) and raw (`r"..."`) strings are literal and never
+  interpolated. In a double-quoted string, `$${` gives a literal `${`.
+- A missing path is an error with its line and column; a reference cycle
+  (`a = "${b}"`, `b = "${a}"`) is reported as a circular reference.
+- In an included file, paths are looked up in that file first, then in the file that
+  included it. Values set with `Resolver::set_variable` are used when the document has
+  no value at the path.
 
 ### **Advanced Nesting & Arrays**
 ```noml
@@ -168,6 +199,8 @@ memory_limit = @size("512MB")
 name = "api-handler" 
 threads = 8
 memory_limit = @size("1GB")
+```
+
 ## 📊 **Performance Comparison**
 
 NOML delivers **high-performance parsing** while providing **146% more features** than static alternatives:
@@ -214,9 +247,16 @@ NOML can parse **most TOML files** with full format preservation:
 ```rust
 // Parse TOML files with NOML for advanced features
 let config = noml::parse_from_file("config.toml")?;
-let port = config.get("server.port")?.as_integer()?;  // Path-based access
+let port = config.get("server.port").unwrap().as_integer()?;  // Path-based access
 ```
-*Note: ISO date formats (`1979-05-27T15:32:00-08:00`) are not supported*
+Supported from TOML: bare, quoted and dotted keys, `[tables]` and `[[arrays of tables]]`
+in any order, basic and literal strings (single and multi-line, with TOML escapes such as
+`\u00E9`), integers in decimal/hex/octal/binary with `_` separators, `inf`/`nan` floats,
+and comments anywhere, including inside arrays. Defining the same key twice is an error,
+as in TOML.
+
+*Note: TOML date-time literals (`1979-05-27T15:32:00-08:00`) are not supported yet; quote
+them as strings.*
 
 ## 🎯 **Why Choose NOML?**
 
@@ -265,7 +305,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 ---
 
 <div align="center">
-    <strong>NOML 0.9.1 - High-Performance Dynamic Configuration</strong><br>
+    <strong>NOML 0.9.2 - High-Performance Dynamic Configuration</strong><br>
     <em>Blazing-fast • Feature-rich • Format-preserving</em>
 </div>
 
@@ -302,7 +342,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-noml = { version = "0.9.0", features = ["async"] }
+noml = { version = "0.9", features = ["async"] }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -344,7 +384,7 @@ assert_eq!(config.get("app_version").unwrap().as_string()?, "2.1.0");
 
 **Available Native Types:**
 - `@size("10MB")` - File/memory sizes (KB, MB, GB, etc.)
-- `@duration("30s")` - Time durations (s, m, h, d)
+- `@duration("30s")` - Time durations (ms, s, m, h, d, w), compound forms like `"1h30m"`
 - `@url("https://...")` - URL validation
 - `@ip("192.168.1.1")` - IP address validation (IPv4/IPv6)
 - `@semver("1.2.3")` - Semantic version parsing
@@ -439,7 +479,7 @@ assert_eq!(updated_config.get("database.port").unwrap().as_integer()?, 5432);
 
 ```toml
 [dependencies]
-noml = { version = "0.9.0", features = ["async"] }
+noml = { version = "0.9", features = ["async"] }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -459,7 +499,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         url = env("DATABASE_URL", "sqlite:memory:")
     "#).await?;
     
-    println!("App: {}", config.get("app_name")?.as_string()?);
+    println!("App: {}", config.get("app_name").unwrap().as_string()?);
 
     // Load, modify, and save configurations asynchronously
     let mut config = Config::load_async("config.noml").await?;

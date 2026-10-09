@@ -4,9 +4,8 @@
 //! This includes comments, formatting, and source location information for
 //! perfect round-trip serialization and error reporting.
 
-use crate::error::{NomlError, Result};
+use crate::error::Result;
 use crate::value::Value;
-use std::collections::BTreeMap;
 use std::fmt;
 
 /// Represents a complete NOML document with metadata
@@ -352,9 +351,22 @@ impl Document {
         }
     }
 
-    /// Convert the AST to a Value tree (losing source information)
+    /// Convert the AST to a Value tree (losing source information).
+    ///
+    /// This resolves the document the same way [`crate::parse`] does: `env()`,
+    /// native types, `${...}` interpolation and includes (relative to the
+    /// document's directory when it was read from a file).
     pub fn to_value(&self) -> Result<Value> {
-        self.root.to_value()
+        let mut resolver = crate::resolver::Resolver::new();
+        if let Some(dir) = self
+            .source_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .and_then(std::path::Path::parent)
+        {
+            resolver = resolver.with_base_path(dir);
+        }
+        resolver.resolve(self)
     }
 
     /// Get the source text for a span
@@ -413,55 +425,13 @@ impl AstNode {
         }
     }
 
-    /// Convert this AST node to a Value (losing source information)
+    /// Convert this AST node to a Value (losing source information).
+    ///
+    /// The node is treated as the root of a document: `env()`, native types
+    /// and includes are resolved, and `${...}` paths are looked up from this
+    /// node.
     pub fn to_value(&self) -> Result<Value> {
-        match &self.value {
-            AstValue::Null => Ok(Value::Null),
-            AstValue::Bool(b) => Ok(Value::Bool(*b)),
-            AstValue::Integer { value, .. } => Ok(Value::Integer(*value)),
-            AstValue::Float { value, .. } => Ok(Value::Float(*value)),
-            AstValue::String { value, .. } => Ok(Value::String(value.clone())),
-            AstValue::Array { elements, .. } => {
-                let values = elements
-                    .iter()
-                    .map(|elem| elem.to_value())
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(Value::Array(values))
-            }
-            AstValue::Table { entries, .. } => {
-                let mut value = Value::Table(BTreeMap::new());
-                for entry in entries {
-                    let key = entry.key.to_string();
-                    let entry_value = entry.value.to_value()?;
-                    value.set(&key, entry_value)?;
-                }
-                Ok(value)
-            }
-            AstValue::FunctionCall { name, args } => {
-                // Handle built-in functions
-                match name.as_str() {
-                    "env" => self.handle_env_function(args),
-                    "size" => self.handle_size_function(args),
-                    "duration" => self.handle_duration_function(args),
-                    _ => Err(NomlError::validation(format!("Unknown function: {name}"))),
-                }
-            }
-            AstValue::Interpolation { path } => {
-                // This should be resolved during processing
-                Err(NomlError::interpolation(
-                    "Unresolved interpolation",
-                    path.clone(),
-                ))
-            }
-            AstValue::Include { path } => {
-                // This should be resolved during processing
-                Err(NomlError::import(
-                    path.clone(),
-                    "Unresolved include directive",
-                ))
-            }
-            AstValue::Native { type_name, args } => self.handle_native_type(type_name, args),
-        }
+        crate::resolver::Resolver::new().resolve_root(self)
     }
 
     /// Find the AST node that contains the given byte offset
@@ -547,90 +517,6 @@ impl AstNode {
                 }
             }
             _ => {}
-        }
-    }
-
-    /// Handle env() function calls
-    fn handle_env_function(&self, args: &[AstNode]) -> Result<Value> {
-        if args.is_empty() || args.len() > 2 {
-            return Err(NomlError::validation(
-                "env() function requires 1 or 2 arguments",
-            ));
-        }
-
-        let var_name = match args[0].to_value()? {
-            Value::String(name) => name,
-            _ => {
-                return Err(NomlError::validation(
-                    "env() first argument must be a string",
-                ));
-            }
-        };
-
-        match std::env::var(&var_name) {
-            Ok(value) => Ok(Value::String(value)),
-            Err(_) => {
-                if args.len() == 2 {
-                    // Use default value
-                    args[1].to_value()
-                } else {
-                    Err(NomlError::env_var(var_name, false))
-                }
-            }
-        }
-    }
-
-    /// Handle size() function calls
-    fn handle_size_function(&self, args: &[AstNode]) -> Result<Value> {
-        if args.len() != 1 {
-            return Err(NomlError::validation(
-                "size() function requires exactly 1 argument",
-            ));
-        }
-
-        let size_str = match args[0].to_value()? {
-            Value::String(s) => s,
-            _ => return Err(NomlError::validation("size() argument must be a string")),
-        };
-
-        parse_size(&size_str)
-            .map(Value::Size)
-            .ok_or_else(|| NomlError::validation(format!("Invalid size format: {size_str}")))
-    }
-
-    /// Handle duration() function calls
-    fn handle_duration_function(&self, args: &[AstNode]) -> Result<Value> {
-        if args.len() != 1 {
-            return Err(NomlError::validation(
-                "duration() function requires exactly 1 argument",
-            ));
-        }
-
-        let duration_str = match args[0].to_value()? {
-            Value::String(s) => s,
-            _ => {
-                return Err(NomlError::validation(
-                    "duration() argument must be a string",
-                ));
-            }
-        };
-
-        parse_duration(&duration_str)
-            .map(Value::Duration)
-            .ok_or_else(|| {
-                NomlError::validation(format!("Invalid duration format: {duration_str}"))
-            })
-    }
-
-    /// Handle native type constructors
-    fn handle_native_type(&self, type_name: &str, args: &[AstNode]) -> Result<Value> {
-        match type_name {
-            "size" => self.handle_size_function(args),
-            "duration" => self.handle_duration_function(args),
-            // "date" => self.handle_date_function(args), // Disabled: chrono feature not available
-            _ => Err(NomlError::validation(format!(
-                "Unknown native type: @{type_name}"
-            ))),
         }
     }
 }
@@ -756,68 +642,6 @@ impl Comments {
     }
 }
 
-/// Parse a size string like "10MB", "1.5GB" into bytes
-fn parse_size(s: &str) -> Option<u64> {
-    let s = s.trim().to_lowercase();
-    if s.is_empty() {
-        return None;
-    }
-
-    let (number_part, unit_part) = if let Some(pos) = s.find(|c: char| c.is_alphabetic()) {
-        s.split_at(pos)
-    } else {
-        (s.as_str(), "")
-    };
-
-    let number: f64 = number_part.parse().ok()?;
-    if number < 0.0 {
-        return None;
-    }
-
-    let multiplier = match unit_part {
-        "" | "b" | "byte" | "bytes" => 1,
-        "k" | "kb" | "kib" => 1024,
-        "m" | "mb" | "mib" => 1024 * 1024,
-        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
-        "t" | "tb" | "tib" => 1024_u64.pow(4),
-        "p" | "pb" | "pib" => 1024_u64.pow(5),
-        _ => return None,
-    };
-
-    Some((number * multiplier as f64) as u64)
-}
-
-/// Parse a duration string like "30s", "1.5m" into seconds
-fn parse_duration(s: &str) -> Option<f64> {
-    let s = s.trim().to_lowercase();
-    if s.is_empty() {
-        return None;
-    }
-
-    let (number_part, unit_part) = if let Some(pos) = s.find(|c: char| c.is_alphabetic()) {
-        s.split_at(pos)
-    } else {
-        (s.as_str(), "s") // Default to seconds
-    };
-
-    let number: f64 = number_part.parse().ok()?;
-    if number < 0.0 {
-        return None;
-    }
-
-    let multiplier = match unit_part {
-        "ms" | "millisecond" | "milliseconds" => 0.001,
-        "" | "s" | "sec" | "second" | "seconds" => 1.0,
-        "m" | "min" | "minute" | "minutes" => 60.0,
-        "h" | "hr" | "hour" | "hours" => 3600.0,
-        "d" | "day" | "days" => 86400.0,
-        "w" | "week" | "weeks" => 604800.0,
-        _ => return None,
-    };
-
-    Some(number * multiplier)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -855,24 +679,6 @@ mod tests {
             Span::new(0, 11, 1, 1, 1, 11),
         );
         assert_eq!(dotted_key.to_string(), "server.host");
-    }
-
-    #[test]
-    fn parse_sizes() {
-        assert_eq!(parse_size("1024"), Some(1024));
-        assert_eq!(parse_size("1KB"), Some(1024));
-        assert_eq!(parse_size("1.5MB"), Some(1572864));
-        assert_eq!(parse_size("1GB"), Some(1073741824));
-        assert_eq!(parse_size("invalid"), None);
-    }
-
-    #[test]
-    fn parse_durations() {
-        assert_eq!(parse_duration("30"), Some(30.0));
-        assert_eq!(parse_duration("30s"), Some(30.0));
-        assert_eq!(parse_duration("1.5m"), Some(90.0));
-        assert_eq!(parse_duration("2h"), Some(7200.0));
-        assert_eq!(parse_duration("invalid"), None);
     }
 
     #[test]

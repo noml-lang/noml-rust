@@ -27,7 +27,6 @@ Unlike static configuration languages that force you to handle all dynamic behav
 
 - **Dynamic Resolution**: Environment variables, file imports, and value interpolation
 - **Native Types**: Built-in parsing for durations, sizes, URLs, and other common types  
-- **Logical Operations**: Conditional expressions and computed values
 - **Modular Composition**: Import and merge configurations from multiple files
 - **Type Safety**: Strong typing with intelligent conversion and validation
 - **Source Fidelity**: Complete preservation of comments, formatting, and structure
@@ -104,24 +103,45 @@ backup_dir = "/backups/${app_name}/${environment}"
 [database]
 name = "${app_name}_${environment}"
 connection_string = "postgres://user:pass@localhost/${database.name}"
+pool_size = 20
+max_overflow = ${database.pool_size}   # bare: copies the value and keeps its type
 ```
+
+Rules:
+
+- Paths start at the document root; array elements are reached by index
+  (`${servers.0.host}` or `${servers[0].host}`); quote keys that contain dots
+  (`${"dotted.key"}`).
+- In double-quoted strings (`"..."`, `"""..."""`) the value is converted to text.
+  Tables and arrays can only be copied with a bare `${path}`.
+- References may point forward or chain; a cycle is an error, as is a path that
+  does not exist.
+- Single-quoted and raw strings (`'...'`, `'''...'''`, `r"..."`) are literal and
+  never interpolated. In a double-quoted string, `$${` produces a literal `${`.
+- `env()` defaults and native type arguments can use interpolation:
+  `@size("${max_mb}MB")`.
+- Inside an included file, paths are looked up in that file first, then in the
+  file that included it.
 
 #### File Imports
 Compose configurations from multiple files for modularity:
 
 ```noml
-# Import shared configuration
+# Import shared configuration; the file's contents become the value of the key
 shared_config = include("./shared.noml")
-database_config = include("./database.noml")
+database_config = include "./database.noml"   # parentheses are optional
 
-# Override imported values
 [server]
 port = 8080
 
-# Merge with imported database settings
 [database]
 pool_size = 20
+# Values from an included file can be referenced like any other value
+timeout = ${database_config.timeout}
 ```
+
+Relative paths are resolved from the directory of the file that contains the
+`include`. Include cycles and includes nested more than 10 levels deep are errors.
 
 #### Native Type Constructors
 Parse and validate common types at configuration time:
@@ -141,7 +161,7 @@ cache_size = @size("512KB")
 api_endpoint = @url("https://api.example.com/v1")
 webhook_url = @url("http://localhost:3000/webhook")
 
-# IP address validation
+# IP address validation (IPv4, IPv6, optional CIDR prefix)
 allowed_hosts = [@ip("192.168.1.1"), @ip("10.0.0.0/8")]
 ```
 
@@ -174,23 +194,6 @@ limits = {
 
 ### Advanced Patterns
 
-#### Conditional Configuration
-```noml
-environment = env("NODE_ENV", "development")
-debug_enabled = env("DEBUG", false)
-
-# Environment-specific database configuration
-[database]
-host = env("DB_HOST", "localhost")
-port = env("DB_PORT", "5432")
-ssl_mode = "${environment == 'production' ? 'require' : 'disable'}"
-
-# Debug-specific logging
-[logging]
-level = "${debug_enabled ? 'debug' : 'info'}"
-output = "${debug_enabled ? 'console' : 'file'}"
-```
-
 #### Configuration Inheritance
 ```noml
 # Base configuration
@@ -201,9 +204,9 @@ base_config = include("./base.noml")
 port = env("PORT", 3000)
 workers = env("WORKERS", 4)
 
-# Merge with base database settings
+# Reuse values from the base file
 [database]
-# Inherits from base_config.database
+host = ${base_config.database.host}
 timeout = @duration("10s")
 pool_size = env("DB_POOL_SIZE", 10)
 ```

@@ -55,7 +55,17 @@ pub struct NomlParser<'a> {
     pos: usize,
     /// Source text for span calculations
     source: &'a str,
+    /// Current nesting depth of arrays, inline tables and function arguments
+    depth: usize,
 }
+
+/// Maximum nesting depth for arrays, inline tables and call arguments.
+///
+/// Deeply nested input would otherwise overflow the stack and abort the
+/// process. 64 levels is far beyond what a real config needs and fits in a
+/// 1 MiB stack even in debug builds. The resolver applies the same limit to
+/// the combined depth of a document and the files it includes.
+pub(crate) const MAX_NESTING_DEPTH: usize = 64;
 
 impl<'a> NomlParser<'a> {
     /// Create a new parser
@@ -64,6 +74,7 @@ impl<'a> NomlParser<'a> {
             tokens,
             pos: 0,
             source,
+            depth: 0,
         }
     }
 
@@ -79,32 +90,19 @@ impl<'a> NomlParser<'a> {
         let mut entries = Vec::new();
         let mut comments = Comments::new();
 
-        // Collect leading comments
-        self.collect_leading_comments(&mut comments);
-
+        // Comments are attached to the entry or header that follows them
+        let mut leading = self.take_comments();
         while !self.is_at_end() {
-            // Collect any leading comments first
-            self.collect_leading_comments(&mut comments);
-
-            // Skip whitespace and newlines
-            if self.skip_insignificant_tokens() {
-                continue;
-            }
-
-            if self.is_at_end() {
-                break;
-            }
-
-            // Parse table entry or table header
             if self.check_token(&TokenKind::LeftBracket) {
-                // Parse table header - this creates nested table structure
-                self.parse_table_header(&mut entries)?;
+                leading = self.parse_table_header(&mut entries, leading)?;
             } else {
-                // Parse key-value pair
-                let kv_entry = self.parse_key_value_pair()?;
-                entries.push(kv_entry);
+                let entry = self.parse_key_value_pair(leading)?;
+                entries.push(entry);
+                leading = self.take_comments();
             }
         }
+        // Comments after the last entry
+        comments.after = leading;
 
         let end_span = self.current_span();
         let span = start_span.merge(&end_span);
@@ -117,13 +115,17 @@ impl<'a> NomlParser<'a> {
         Ok(AstNode::with_comments(ast_value, span, comments))
     }
 
-    /// Parse a table header like `[section]` or `[section.subsection]`
-    fn parse_table_header(&mut self, entries: &mut Vec<TableEntry>) -> Result<()> {
+    /// Parse a table header like `[section]` or `[section.subsection]` and the
+    /// entries below it. Returns the comments that follow the section, which
+    /// belong to whatever comes next.
+    fn parse_table_header(
+        &mut self,
+        entries: &mut Vec<TableEntry>,
+        leading: Vec<Comment>,
+    ) -> Result<Vec<Comment>> {
         let start_span = self.current_span();
         let mut comments = Comments::new();
-
-        // Collect comments before the header
-        self.collect_leading_comments(&mut comments);
+        comments.before = leading;
 
         // Consume first '['
         self.consume_token(&TokenKind::LeftBracket, "Expected '['")?;
@@ -139,7 +141,7 @@ impl<'a> NomlParser<'a> {
 
         // Consume closing brackets
         if is_array_of_tables {
-            self.consume_token(&TokenKind::RightBracket, "Expected first ']'")?;
+            self.consume_token(&TokenKind::RightBracket, "Expected ']]'")?;
         }
         self.consume_token(&TokenKind::RightBracket, "Expected ']'")?;
 
@@ -148,25 +150,13 @@ impl<'a> NomlParser<'a> {
             comments.set_inline(comment);
         }
 
-        // Skip newlines after header
-        self.skip_insignificant_tokens();
-
         // Parse the contents of this table section
         let mut table_entries = Vec::new();
+        let mut leading = self.take_comments();
         while !self.is_at_end() && !self.check_token(&TokenKind::LeftBracket) {
-            // Collect any comments first
-            self.collect_leading_comments(&mut comments);
-
-            if self.skip_insignificant_tokens() {
-                continue;
-            }
-
-            if self.is_at_end() || self.check_token(&TokenKind::LeftBracket) {
-                break;
-            }
-
-            let entry = self.parse_key_value_pair()?;
+            let entry = self.parse_key_value_pair(leading)?;
             table_entries.push(entry);
+            leading = self.take_comments();
         }
 
         // Create the table value
@@ -181,64 +171,14 @@ impl<'a> NomlParser<'a> {
             table_span,
         );
 
-        // Create the table entry
-        // For array of tables, we need special handling to create arrays
-        if is_array_of_tables {
-            // Check if we already have an entry with this key
-            if let Some(existing_entry) = entries.iter_mut().find(|e| e.key == key)
-            // Direct comparison using custom PartialEq
-            {
-                // Convert existing table to array of tables or add to existing array
-                match &mut existing_entry.value.value {
-                    AstValue::Array { elements, .. } => {
-                        // Already an array, add new table
-                        elements.push(table_value);
-                    }
-                    _ => {
-                        // Convert single table to array of tables
-                        let existing_table = existing_entry.value.clone();
-                        let array_value = AstValue::Array {
-                            elements: vec![existing_table, table_value],
-                            multiline: true,
-                            trailing_comma: false,
-                        };
-                        existing_entry.value = AstNode::new(array_value, existing_entry.value.span);
-                        // Copy instead of clone
-                    }
-                }
-            } else {
-                // First occurrence - create array with single element
-                let array_value = AstValue::Array {
-                    elements: vec![table_value],
-                    multiline: true,
-                    trailing_comma: false,
-                };
-                let array_node = AstNode::new(array_value, table_span);
-                let entry = TableEntry {
-                    key,
-                    value: array_node,
-                    comments,
-                };
-                entries.push(entry);
-            }
-        } else {
-            // Regular table
-            let entry = TableEntry {
-                key,
-                value: table_value,
-                comments,
-            };
-            entries.push(entry);
-        }
-        Ok(())
+        attach_section(entries, key, table_value, comments, is_array_of_tables)?;
+        Ok(leading)
     }
 
-    /// Parse a key-value pair
-    fn parse_key_value_pair(&mut self) -> Result<TableEntry> {
+    /// Parse a key-value pair; `leading` are the comments right above it
+    fn parse_key_value_pair(&mut self, leading: Vec<Comment>) -> Result<TableEntry> {
         let mut comments = Comments::new();
-
-        // Collect leading comments
-        self.collect_leading_comments(&mut comments);
+        comments.before = leading;
 
         // Parse the key
         let key = self.parse_key()?;
@@ -297,6 +237,16 @@ impl<'a> NomlParser<'a> {
                 quoted: true,
                 quote_style: Some(convert_string_style(style)),
             }),
+            // Keywords and digit-only names are valid bare keys, as in TOML
+            TokenKind::Bool(_)
+            | TokenKind::Null
+            | TokenKind::EnvFunc
+            | TokenKind::Include
+            | TokenKind::Integer { .. } => Ok(KeySegment {
+                name: token.text.to_string(),
+                quoted: false,
+                quote_style: None,
+            }),
             _ => Err(NomlError::unexpected_token(
                 format!("{}", token.kind),
                 "identifier or string",
@@ -311,6 +261,24 @@ impl<'a> NomlParser<'a> {
         let token = self.peek()?;
 
         match &token.kind {
+            // `inf` and `nan` are float literals in value position (TOML)
+            TokenKind::Identifier(name @ ("inf" | "nan")) => {
+                let value = if *name == "inf" {
+                    f64::INFINITY
+                } else {
+                    f64::NAN
+                };
+                let raw = name.to_string();
+                let token = self.advance()?;
+                Ok(AstNode::new(AstValue::Float { value, raw }, token.span))
+            }
+            TokenKind::Identifier(name) => Err(NomlError::parse_with_suggestion(
+                format!("Unexpected identifier '{name}' where a value was expected"),
+                token.span.start_line,
+                token.span.start_column,
+                format!("String values must be quoted: \"{name}\""),
+            )),
+
             // Literals
             TokenKind::String { .. } => self.parse_string_value(),
             TokenKind::Integer { .. } => self.parse_integer_value(),
@@ -319,12 +287,12 @@ impl<'a> NomlParser<'a> {
             TokenKind::Null => self.parse_null_value(),
 
             // Collections
-            TokenKind::LeftBracket => self.parse_array(),
-            TokenKind::LeftBrace => self.parse_inline_table(),
+            TokenKind::LeftBracket => self.nested(Self::parse_array),
+            TokenKind::LeftBrace => self.nested(Self::parse_inline_table),
 
             // Functions and special constructs
-            TokenKind::EnvFunc => self.parse_env_function(),
-            TokenKind::At => self.parse_native_type(),
+            TokenKind::EnvFunc => self.nested(Self::parse_env_function),
+            TokenKind::At => self.nested(Self::parse_native_type),
             TokenKind::InterpolationStart => self.parse_interpolation(),
             TokenKind::Include => self.parse_include(),
 
@@ -337,6 +305,22 @@ impl<'a> NomlParser<'a> {
         }
     }
 
+    /// Run a nested parse step, enforcing [`MAX_NESTING_DEPTH`]
+    fn nested(&mut self, step: fn(&mut Self) -> Result<AstNode>) -> Result<AstNode> {
+        if self.depth >= MAX_NESTING_DEPTH {
+            let (line, column) = (self.current_line(), self.current_column());
+            return Err(NomlError::parse(
+                format!("Nesting is deeper than the limit of {MAX_NESTING_DEPTH} levels"),
+                line,
+                column,
+            ));
+        }
+        self.depth += 1;
+        let result = step(self);
+        self.depth -= 1;
+        result
+    }
+
     /// Parse a string value
     fn parse_string_value(&mut self) -> Result<AstNode> {
         let token = self.advance()?;
@@ -346,8 +330,11 @@ impl<'a> NomlParser<'a> {
             ref style,
         } = token.kind
         {
-            // Check if the original raw text contains escape sequences
-            let has_escapes = token.text.contains('\\');
+            // Only basic (double-quoted) strings process escapes
+            let has_escapes = matches!(
+                style,
+                LexerStringStyle::Double | LexerStringStyle::TripleDouble
+            ) && token.text.contains('\\');
 
             let ast_value = AstValue::String {
                 value: value.clone(),
@@ -416,65 +403,51 @@ impl<'a> NomlParser<'a> {
         // Consume '['
         self.consume_token(&TokenKind::LeftBracket, "Expected '['")?;
 
-        let mut elements = Vec::new();
-        let mut multiline = false;
+        let mut elements: Vec<AstNode> = Vec::new();
         let mut trailing_comma = false;
+        let mut comments = Comments::new();
 
-        // Handle empty array
-        if self.match_token(&TokenKind::RightBracket) {
-            let end_span = self.current_span();
-            let span = start_span.merge(&end_span);
-
-            let ast_value = AstValue::Array {
-                elements,
-                multiline: false,
-                trailing_comma: false,
-            };
-            return Ok(AstNode::new(ast_value, span));
-        }
-
-        // Parse array elements
         loop {
-            // Check for newlines (indicates multiline)
-            if self.skip_newlines() {
-                multiline = true;
-            }
+            let leading = self.take_comments();
 
-            // Check for closing bracket
+            // Closing bracket (empty array, or after a trailing comma)
             if self.check_token(&TokenKind::RightBracket) {
+                comments.after = leading;
                 break;
             }
 
-            // Parse element
-            let element = self.parse_value()?;
-            elements.push(element);
+            let mut element = self.parse_value()?;
+            element.comments.before = leading;
 
-            // Skip whitespace
-            self.skip_whitespace();
-
-            // Check for comma or end
             if self.match_token(&TokenKind::Comma) {
                 trailing_comma = true;
-                self.skip_whitespace();
-
-                // Check if this was a trailing comma
-                if self.check_token(&TokenKind::RightBracket) {
-                    break;
-                } else {
-                    trailing_comma = false;
+                if let Some(comment) = self.parse_inline_comment()? {
+                    element.comments.set_inline(comment);
                 }
-            } else if self.check_token(&TokenKind::RightBracket) {
-                break;
+                elements.push(element);
             } else {
-                return Err(NomlError::parse(
-                    "Expected ',' or ']' in array",
-                    self.current_line(),
-                    self.current_column(),
-                ));
+                trailing_comma = false;
+                if let Some(comment) = self.parse_inline_comment()? {
+                    element.comments.set_inline(comment);
+                }
+                elements.push(element);
+                comments.after = self.take_comments();
+                if !self.check_token(&TokenKind::RightBracket) {
+                    return Err(NomlError::parse(
+                        "Expected ',' or ']' in array",
+                        self.current_line(),
+                        self.current_column(),
+                    ));
+                }
+                break;
             }
+        }
+        if elements.is_empty() {
+            trailing_comma = false;
         }
 
         // Consume ']'
+        let end_line = self.current_line();
         self.consume_token(&TokenKind::RightBracket, "Expected ']'")?;
 
         let end_span = self.current_span();
@@ -482,11 +455,11 @@ impl<'a> NomlParser<'a> {
 
         let ast_value = AstValue::Array {
             elements,
-            multiline,
+            multiline: end_line != start_span.start_line,
             trailing_comma,
         };
 
-        Ok(AstNode::new(ast_value, span))
+        Ok(AstNode::with_comments(ast_value, span, comments))
     }
 
     /// Parse an inline table
@@ -498,47 +471,28 @@ impl<'a> NomlParser<'a> {
 
         let mut entries = Vec::new();
 
-        // Skip whitespace
-        self.skip_whitespace();
-
-        // Handle empty table
-        if self.match_token(&TokenKind::RightBrace) {
-            let end_span = self.current_span();
-            let span = start_span.merge(&end_span);
-
-            let ast_value = AstValue::Table {
-                entries,
-                inline: true,
-            };
-            return Ok(AstNode::new(ast_value, span));
-        }
-
-        // Parse table entries
         loop {
-            // Parse key-value pair
-            let entry = self.parse_key_value_pair()?;
-            entries.push(entry);
+            let leading = self.take_comments();
+            if self.check_token(&TokenKind::RightBrace) {
+                break;
+            }
 
-            // Skip whitespace
-            self.skip_whitespace();
+            let entry = self.parse_key_value_pair(leading)?;
+            entries.push(entry);
 
             // Check for comma or end
             if self.match_token(&TokenKind::Comma) {
-                self.skip_whitespace();
-
-                // Check for trailing comma
-                if self.check_token(&TokenKind::RightBrace) {
-                    break;
-                }
-            } else if self.check_token(&TokenKind::RightBrace) {
-                break;
-            } else {
-                return Err(NomlError::parse(
-                    "Expected ',' or '}' in inline table",
-                    self.current_line(),
-                    self.current_column(),
-                ));
+                continue;
             }
+            self.take_comments();
+            if self.check_token(&TokenKind::RightBrace) {
+                break;
+            }
+            return Err(NomlError::parse(
+                "Expected ',' or '}' in inline table",
+                self.current_line(),
+                self.current_column(),
+            ));
         }
 
         // Consume '}'
@@ -656,54 +610,47 @@ impl<'a> NomlParser<'a> {
         // Consume '${'
         self.consume_token(&TokenKind::InterpolationStart, "Expected '${'")?;
 
-        // Parse the path - support dot-separated paths and array indices
-        let mut path_segments = Vec::new();
-
-        // First segment must be an identifier
-        if let TokenKind::Identifier(name) = &self.advance()?.kind {
-            path_segments.push(name.to_string());
-        } else {
-            return Err(NomlError::parse_with_suggestion(
-                "Expected identifier in interpolation path",
-                self.current_line(),
-                self.current_column(),
-                "Interpolation paths should start with a variable name (e.g., '${server.host}')",
-            ));
-        }
-
-        // Parse additional segments separated by dots
-        while self.pos < self.tokens.len() {
-            if let Ok(token) = self.peek() {
-                if token.kind == TokenKind::Dot {
-                    self.advance()?; // consume dot
-
-                    // Next token should be identifier or integer (for array access)
-                    let next_token = self.advance()?;
-                    match &next_token.kind {
-                        TokenKind::Identifier(name) => {
-                            path_segments.push(name.to_string());
-                        }
-                        TokenKind::Integer { value, .. } => {
-                            path_segments.push(value.to_string());
-                        }
-                        _ => {
-                            return Err(NomlError::parse(
-                                "Expected identifier or integer after '.' in path",
-                                self.current_line(),
-                                self.current_column(),
-                            ));
-                        }
-                    }
-                } else {
-                    break;
+        // Parse the path: dot-separated key names and array indices. Quoted
+        // segments keep their quotes so keys containing dots stay unambiguous.
+        let mut path = String::new();
+        loop {
+            let token = self.advance()?;
+            match &token.kind {
+                TokenKind::Identifier(_)
+                | TokenKind::Integer { .. }
+                | TokenKind::Bool(_)
+                | TokenKind::Null
+                | TokenKind::EnvFunc
+                | TokenKind::Include => path.push_str(token.text),
+                // `items.1.2` lexes `1.2` as a float; it is two index segments
+                TokenKind::Float { raw, .. }
+                    if raw.bytes().all(|b| b.is_ascii_digit() || b == b'.') =>
+                {
+                    path.push_str(raw)
                 }
+                TokenKind::String { value, .. } => {
+                    path.push('"');
+                    path.push_str(value);
+                    path.push('"');
+                }
+                _ => {
+                    return Err(NomlError::parse_with_suggestion(
+                        format!(
+                            "Expected a key name in interpolation path, found {}",
+                            token.kind
+                        ),
+                        token.span.start_line,
+                        token.span.start_column,
+                        "Interpolation paths are dotted keys, e.g. '${server.host}'",
+                    ));
+                }
+            }
+            if self.match_token(&TokenKind::Dot) {
+                path.push('.');
             } else {
                 break;
             }
         }
-
-        // Join path segments with dots
-        let path = path_segments.join(".");
 
         // Consume '}'
         self.consume_token(&TokenKind::RightBrace, "Expected '}'")?;
@@ -723,17 +670,24 @@ impl<'a> NomlParser<'a> {
         // Consume 'include'
         self.consume_token(&TokenKind::Include, "Expected 'include'")?;
 
+        // `include "path"` or `include("path")`
+        let parenthesized = self.match_token(&TokenKind::LeftParen);
+
         // Parse the path string
-        let path_node = self.parse_string_value()?;
-        let path = if let AstValue::String { ref value, .. } = path_node.value {
-            value.clone()
-        } else {
-            return Err(NomlError::parse(
-                "Expected string path for include",
-                self.current_line(),
-                self.current_column(),
-            ));
+        let token = self.advance()?;
+        let path = match token.kind {
+            TokenKind::String { value, .. } => value,
+            other => {
+                return Err(NomlError::parse(
+                    format!("Expected a quoted file path after 'include', found {other}"),
+                    token.span.start_line,
+                    token.span.start_column,
+                ));
+            }
         };
+        if parenthesized {
+            self.consume_token(&TokenKind::RightParen, "Expected ')' after include path")?;
+        }
 
         let end_span = self.current_span();
         let span = start_span.merge(&end_span);
@@ -769,7 +723,15 @@ impl<'a> NomlParser<'a> {
                 self.current_column(),
             ));
         }
-        let token = self.tokens[self.pos].clone(); // TODO: Could avoid this clone by changing API
+        // Tokens are never revisited once consumed, so move the token out
+        // instead of cloning it (a clone copies every string and comment).
+        let slot = &mut self.tokens[self.pos];
+        let placeholder = Token {
+            kind: TokenKind::Whitespace,
+            span: slot.span,
+            text: slot.text,
+        };
+        let token = std::mem::replace(slot, placeholder);
         self.pos += 1;
         Ok(token)
     }
@@ -825,35 +787,6 @@ impl<'a> NomlParser<'a> {
         skipped
     }
 
-    /// Skip newline tokens
-    fn skip_newlines(&mut self) -> bool {
-        let mut skipped = false;
-        while let Ok(token) = self.peek() {
-            if matches!(token.kind, TokenKind::Newline) {
-                self.pos += 1;
-                skipped = true;
-            } else {
-                break;
-            }
-        }
-        skipped
-    }
-
-    /// Skip whitespace and newline tokens
-    fn skip_insignificant_tokens(&mut self) -> bool {
-        let mut skipped = false;
-        while let Ok(token) = self.peek() {
-            match token.kind {
-                TokenKind::Whitespace | TokenKind::Newline => {
-                    self.pos += 1;
-                    skipped = true;
-                }
-                _ => break,
-            }
-        }
-        skipped
-    }
-
     /// Get current position for span calculation
     fn current_span(&self) -> Span {
         if let Ok(token) = self.peek() {
@@ -890,46 +823,127 @@ impl<'a> NomlParser<'a> {
         }
     }
 
-    /// Collect leading comments
-    fn collect_leading_comments(&mut self, comments: &mut Comments) {
-        while let Ok(token) = self.peek() {
+    /// Take the comment tokens at the current position
+    fn take_comments(&mut self) -> Vec<Comment> {
+        let mut comments = Vec::new();
+        while let Some(token) = self.tokens.get(self.pos) {
             match &token.kind {
                 TokenKind::Comment { text } => {
+                    comments.push(Comment {
+                        text: text.clone(),
+                        span: token.span,
+                        style: CommentStyle::Line,
+                    });
+                    self.pos += 1;
+                }
+                TokenKind::Whitespace | TokenKind::Newline => self.pos += 1,
+                _ => break,
+            }
+        }
+        comments
+    }
+
+    /// Parse a comment on the same line as the previous token
+    fn parse_inline_comment(&mut self) -> Result<Option<Comment>> {
+        let previous_line = match self.pos.checked_sub(1).and_then(|i| self.tokens.get(i)) {
+            Some(token) => token.span.end_line,
+            None => return Ok(None),
+        };
+
+        if let Some(token) = self.tokens.get(self.pos) {
+            if let TokenKind::Comment { text } = &token.kind {
+                if token.span.start_line == previous_line {
                     let comment = Comment {
                         text: text.clone(),
                         span: token.span,
                         style: CommentStyle::Line,
                     };
-                    comments.add_before(comment);
                     self.pos += 1;
+                    return Ok(Some(comment));
                 }
-                TokenKind::Whitespace | TokenKind::Newline => {
-                    self.pos += 1;
-                }
-                _ => break,
-            }
-        }
-    }
-
-    /// Parse inline comment
-    fn parse_inline_comment(&mut self) -> Result<Option<Comment>> {
-        // Skip whitespace first
-        self.skip_whitespace();
-
-        if let Ok(token) = self.peek() {
-            if let TokenKind::Comment { text } = &token.kind {
-                let comment = Comment {
-                    text: text.clone(),
-                    span: token.span,
-                    style: CommentStyle::Line,
-                };
-                self.pos += 1;
-                return Ok(Some(comment));
             }
         }
 
         Ok(None)
     }
+}
+
+/// True for an array built from `[[section]]` headers
+fn is_table_array(node: &AstNode) -> bool {
+    matches!(&node.value, AstValue::Array { elements, .. }
+        if !elements.is_empty()
+            && elements
+                .iter()
+                .all(|e| matches!(e.value, AstValue::Table { inline: false, .. })))
+}
+
+/// Place a `[section]` or `[[section]]` in `entries`.
+///
+/// A section whose key extends an earlier `[[array]]` key belongs to the
+/// array's current last element (TOML rule), so it is stored inside that
+/// element. Deciding this while parsing keeps later `[[array]]` headers from
+/// changing which element an earlier section refers to.
+fn attach_section(
+    entries: &mut Vec<TableEntry>,
+    key: Key,
+    table: AstNode,
+    comments: Comments,
+    is_array: bool,
+) -> Result<()> {
+    // Most recent array-of-tables whose key is a strict prefix of this key
+    let parent = entries.iter_mut().rev().find(|e| {
+        e.key.segments.len() < key.segments.len()
+            && key.segments.starts_with(&e.key.segments)
+            && is_table_array(&e.value)
+    });
+    if let Some(parent) = parent {
+        let prefix = parent.key.segments.len();
+        if let AstValue::Array { elements, .. } = &mut parent.value.value {
+            if let Some(AstValue::Table { entries: inner, .. }) =
+                elements.last_mut().map(|e| &mut e.value)
+            {
+                let rest = Key::dotted(key.segments[prefix..].to_vec(), key.span);
+                return attach_section(inner, rest, table, comments, is_array);
+            }
+        }
+    }
+
+    if is_array {
+        // Add to the existing array of tables, or start one
+        if let Some(existing) = entries.iter_mut().find(|e| e.key == key) {
+            if is_table_array(&existing.value) {
+                if let AstValue::Array { elements, .. } = &mut existing.value.value {
+                    elements.push(table);
+                }
+                return Ok(());
+            }
+            return Err(NomlError::parse(
+                format!("'{key}' is already defined and is not an array of tables"),
+                key.span.start_line,
+                key.span.start_column,
+            ));
+        }
+        let span = table.span;
+        entries.push(TableEntry {
+            key,
+            value: AstNode::new(
+                AstValue::Array {
+                    elements: vec![table],
+                    multiline: true,
+                    trailing_comma: false,
+                },
+                span,
+            ),
+            comments,
+        });
+    } else {
+        entries.push(TableEntry {
+            key,
+            value: table,
+            comments,
+        });
+    }
+    Ok(())
 }
 
 /// Convert lexer string style to AST string style

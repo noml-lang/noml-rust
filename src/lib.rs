@@ -73,6 +73,30 @@
 //! # Ok::<(), noml::error::NomlError>(())
 //! ```
 //!
+//! ## Interpolation
+//!
+//! `${path}` refers to another value by its dotted path from the document
+//! root. In a double-quoted string the value is inserted as text; as a bare
+//! value it is copied with its type. See the [`resolver`] module for the full
+//! rules (escaping, literal strings, includes, cycles).
+//!
+//! ```rust
+//! let config = noml::parse(r#"
+//!     app_name = "shop"
+//!     port = 8080
+//!     log_file = "/var/log/${app_name}.log"
+//!     listen = ${port}
+//!
+//!     [database]
+//!     name = "${app_name}_db"
+//! "#)?;
+//!
+//! assert_eq!(config.get("log_file").unwrap().as_string()?, "/var/log/shop.log");
+//! assert_eq!(config.get("listen").unwrap().as_integer()?, 8080);
+//! assert_eq!(config.get("database.name").unwrap().as_string()?, "shop_db");
+//! # Ok::<(), noml::NomlError>(())
+//! ```
+//!
 //! ## Advanced Configuration Management
 //!
 //! ```rust
@@ -193,6 +217,8 @@ pub mod resolver;
 pub mod schema;
 pub mod serializer;
 pub mod value;
+
+mod tree;
 
 // Re-export main types for convenience
 pub use config::Config;

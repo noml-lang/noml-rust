@@ -83,15 +83,8 @@ fn validate_file(file_path: &str) {
 }
 
 fn parse_file(file_path: &str) {
-    let content = match fs::read_to_string(file_path) {
-        Ok(content) => content,
-        Err(err) => {
-            eprintln!("Error reading file '{file_path}': {err}");
-            process::exit(1);
-        }
-    };
-
-    let document = match noml::parse(&content) {
+    // Read through the library so includes resolve relative to the file
+    let document = match noml::parse_from_file(file_path) {
         Ok(doc) => doc,
         Err(err) => {
             eprintln!("Parse error in '{file_path}':");

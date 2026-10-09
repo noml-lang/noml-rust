@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - 'v*'  # Trigger on version tags like v1.0.0
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to rebuild missing binaries for (e.g. v0.9.1)'
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
+  # The tag being released: the pushed tag, or the one given to a manual run
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 permissions:
   contents: write  # Required for creating releases and uploading assets
@@ -21,17 +28,17 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
+          ref: ${{ env.TAG }}
           fetch-depth: 0  # Full history for changelog
 
       - name: Get version from tag
         id: get_version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
         id: changelog
@@ -47,21 +54,16 @@ jobs:
       - name: Create Release
         id: create_release
         run: |
-          # Read release notes
-          if [[ -f release_notes.md ]]; then
-            RELEASE_NOTES=$(cat release_notes.md)
-          else
-            RELEASE_NOTES="Release ${{ steps.get_version.outputs.version }}"
+          # A release may already exist (created by hand, or a re-run); keep it
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
           fi
-          
-          # Create release using GitHub CLI
-          gh release create ${{ github.ref_name }} \
+
+          gh release create "$TAG" \
             --title "Release ${{ steps.get_version.outputs.version }}" \
-            --notes "$RELEASE_NOTES" \
+            --notes-file release_notes.md \
             --verify-tag
-          
-          # Get upload URL for other jobs
-          echo "upload_url=$(gh api repos/${{ github.repository }}/releases/tags/${{ github.ref_name }} --jq '.upload_url')" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -87,7 +89,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -100,7 +104,7 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
@@ -111,17 +115,24 @@ jobs:
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             archive_name="noml-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.zip"
-            7z a "$archive_name" target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+            7z a "$archive_name" ./target/${{ matrix.target }}/release/${{ matrix.binary_name }}
           else
             archive_name="noml-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz"
             tar -czf "$archive_name" -C target/${{ matrix.target }}/release ${{ matrix.binary_name }}
           fi
           echo "ARCHIVE_NAME=$archive_name" >> $GITHUB_ENV
-          echo "ARCHIVE_PATH=$(pwd)/$archive_name" >> $GITHUB_ENV
 
+      # Run under bash on every runner: the archive path is relative, so it
+      # works the same on Windows (pwsh could not resolve the MSYS-style
+      # absolute path the previous version used).
       - name: Upload Release Asset
+        shell: bash
         run: |
-          gh release upload ${{ github.ref_name }} "${{ env.ARCHIVE_PATH }}"
+          if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qxF "$ARCHIVE_NAME"; then
+            echo "$ARCHIVE_NAME is already attached to $TAG"
+          else
+            gh release upload "$TAG" "$ARCHIVE_NAME"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -134,7 +145,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -151,8 +164,22 @@ jobs:
             exit 1
           fi
 
+      # Publishing is skipped when the version is already on crates.io (it may
+      # have been published by hand, or this is a re-run) or when no registry
+      # token is configured for the repository.
       - name: Publish to crates.io
-        run: cargo publish
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          status=$(curl -s -o /dev/null -w '%{http_code}' \
+            -A "noml-release-workflow (github.com/noml-lang/noml-rust)" \
+            "https://crates.io/api/v1/crates/noml/$version")
+          if [[ "$status" == "200" ]]; then
+            echo "noml $version is already on crates.io; nothing to publish"
+          elif [[ -z "$CARGO_REGISTRY_TOKEN" ]]; then
+            echo "::warning::CARGO_REGISTRY_TOKEN is not set; skipping cargo publish"
+          else
+            cargo publish --locked
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -163,10 +190,12 @@ jobs:
     name: Update Documentation
     needs: publish-crate
     runs-on: ubuntu-latest
-    if: always() && needs.publish-crate.result == 'success'
+    # Only for new tags; a manual rebuild of an old release must not replace
+    # the published docs with older ones
+    if: always() && github.event_name == 'push' && needs.publish-crate.result == 'success'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -178,7 +207,7 @@ jobs:
         run: cargo doc --all-features --no-deps
 
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./target/doc

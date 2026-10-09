@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-09
+
+### Fixed
+- **`${...}` interpolation works** ([#23](https://github.com/noml-lang/noml-rust/issues/23)): `parse()`, `parse_from_file()` and the other entry points never filled the variable table, so every reference failed with "Variable not found", and a quoted `"${name}"` failed earlier with a parse error because the lexer inserted a stray token in front of the string. Interpolation now works in all public entry points (`parse`, `parse_from_file`, `parse_async`, `parse_from_file_async`, `Document::to_value`, `Resolver::resolve`, `Config::from_string`, `Config::from_file`, `Config::load_async` and the builder). Paths are dotted keys from the document root, including array indexes (`${servers.0.host}`) and quoted keys. In a double-quoted string the value is inserted as text; a bare `${path}` copies the value with its type. References may point forward or chain, and work inside `env()` defaults and native type arguments. `$${` writes a literal `${`; single-quoted and raw strings are never interpolated. A missing path is an `Interpolation` error with line and column, and a reference cycle is a `CircularReference` error. Included files look up paths in themselves first, then in the including document. Variables set with `Resolver::set_variable` are no longer cleared by `resolve()` and fill in paths the document does not define.
+- **Lost and corrupted table data**: `[a.b]` followed by `[a]` dropped `a.b`; `a.b = 1` followed by `[a]` dropped `a.b`; defining `[a]` twice kept only the second half; a quoted key such as `"a.b" = 1` was split on the dot and stored as `"a: {b"`. Tables are now merged wherever they are defined, quoted keys stay whole, and a `[sub.table]` written between `[[array]]` headers stays with the element it follows.
+- **Duplicate keys are an error**: defining the same key twice used to keep the last value silently. It is now a parse error naming the key and line, as in TOML.
+- **Stack overflow on deeply nested input**: input such as 100,000 nested `[` aborted the process. Arrays, inline tables and call arguments may nest 64 levels, and resolved values 128 levels (including through includes and `${...}` copies); deeper input is a parse error.
+- **Panic on `include` without a quoted path**: `x = include 5` hit an `unreachable!`. It is now a parse error.
+- **`Config` used a different value pipeline**: `Config::from_string` and `Config::from_file` did not resolve includes or interpolation, rejected `@url`, `@ip` and the other native types, and returned `Value::Size`/`Value::Duration` where `parse()` returns integers and floats. `Config` now resolves documents exactly like `parse()`, with includes relative to the file.
+- **`Config::save` wrote files it could not read back**: backslashes and control characters were not escaped, keys needing quotes were written bare, arrays of tables were written as inline arrays, and sizes, durations and non-finite floats were written in forms the parser rejects. Saved files now always load back to the same values, and a literal `${` is escaped.
+- **The serializer wrote invalid NOML for sections**: `serialize_document`/`save_preserving` wrote `server = host = "..."` for a `[server]` table and lost the header of `[[array]]` tables. Sections and arrays of tables are written as headers again, comments stay attached to the entry they precede, and strings that cannot be written in their original quote style fall back to an escaped double-quoted string.
+- **Comments**: a comment on the line after a value was attached to that value as an inline comment, comments inside arrays and inline tables were a syntax error, and all comments before a section were moved to the top of the document.
+- **TOML strings**: single-quoted strings are literal (no escapes), as in TOML, so Windows paths such as `'C:\Users'` parse. Multi-line strings (`"""` and `'''`, with line-ending backslashes) and the TOML escapes `\b`, `\f`, `\e`, `\uXXXX` and `\UXXXXXXXX` are supported.
+- **TOML keys and numbers**: bare keys may contain `-` and may be keywords or digits (`true = 1`, `1234 = "x"`); `+` signs, `inf`, `nan`, `+inf` and `-inf` are accepted; `-0x8000000000000000` no longer fails.
+- **Native types**: `@size` reported values that overflow `i64` as `i64::MAX` and now errors instead; it accepts `KiB`/`MiB`-style units and a space before the unit. `@duration` accepts compound values such as `1h30m` (as the README already showed) and rejects negative values. `@ip` accepts CIDR notation (`10.0.0.0/8`), `@semver` accepts pre-release and build suffixes, `@base64` rejects `=` in the middle of the data, and `@url` rejects an empty host. Native type errors now carry the line and column of the call.
+- **Error positions**: errors from `env()`, includes and native types reported the byte offset as the line number and column 0. They now report the real line and column. Using an unquoted word as a value now says that strings must be quoted.
+- **`include("path")`**: the parenthesised form used in the language spec now parses, alongside `include "path"`.
+- **`NativeResolver` clone panicked**, and cloning a `ResolverConfig` silently dropped custom native resolvers. Both now clone normally.
+- **`Value::as_integer`/`as_float`** accept `Value::Size` and `Value::Duration`.
+- **CLI**: `noml parse <file>` now resolves includes relative to the file.
+
+### Performance
+- The lexer looked up each character by walking the input from the start, so lexing was quadratic in file size. It now reads characters directly. Combined with a resolver that builds values in one pass instead of cloning the syntax tree twice, the benchmark configs parse about 2x (small) to 5x (large) faster. A 190 KB file took 2 s to parse and now takes 17 ms; a 6 MB file, which would have taken about half an hour, parses in under 0.4 s.
+- The parser moves tokens instead of cloning them, which removes a second allocation for every string and comment.
+
+### Changed
+- `tempfile` moved from `[dependencies]` to `[dev-dependencies]`; it was only used by tests, so library users no longer build it.
+- Dependencies: `thiserror` 1 to 2 (not part of the public API), `indexmap` 2.13, `serde` 1.0.226, `tokio` 1.48, `chrono` 0.4.45 in Cargo.lock; dev-dependencies `toml` 1.0 and `tempfile` 3.24. MSRV is unchanged at 1.82.
+- Release workflow: the Windows upload step ran under PowerShell with a bash-style path and failed, which skipped the crates.io and docs jobs for 0.9.1. Uploads now run under bash, re-runs skip work that is already done (existing release, attached assets, already-published version), and a manual run can rebuild missing binaries for an existing tag. GitHub Actions updated to `actions/checkout` v6, `actions/upload-artifact` v6 and `peaceiris/actions-gh-pages` v4.
+
+### Docs
+- README, `docs/NOML.md` and `docs/API.md` describe interpolation as implemented. Removed the conditional-expression examples (`${a == b ? x : y}`), which NOML has never supported, and corrected examples that did not compile (`config.get(...)?` on an `Option`, `as_duration()`, `merge_from_file`) or did not parse (bare `include` statements, an unclosed code block).
+- `Config::get_or` and `ConfigBuilder::validate` now document what they actually do: `get_or` returns `KeyNotFound` for a missing key (its default cannot be returned by reference), and `validate` has no effect yet.
+
 ## [0.9.1] - 2026-10-08
 
 ### Security
@@ -206,7 +240,8 @@
 
 <!-- FOOTER
 ###################################################-->
-[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.9.1...HEAD
+[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/noml-lang/noml-rust/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/noml-lang/noml-rust/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/noml-lang/noml-rust/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/noml-lang/noml-rust/compare/v0.4.0...v0.8.0

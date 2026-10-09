@@ -231,10 +231,13 @@ impl Config {
         self.values.get(key)
     }
 
-    /// Get a value by key path with a default
+    /// Get a value by key path, or an error if it is missing.
     ///
-    /// Returns the default value if the key doesn't exist or cannot be
-    /// converted to the target type.
+    /// The `default` argument is not used: this method returns a reference
+    /// into the configuration, so it cannot hand back a value that is not
+    /// stored there. Returns [`NomlError::KeyNotFound`] when the key is
+    /// missing. To fall back to a default, use [`Config::get_or_insert`], or
+    /// `config.get(key).cloned().unwrap_or(default)`.
     ///
     /// # Example
     /// ```rust
@@ -255,15 +258,11 @@ impl Config {
     {
         match self.get(key) {
             Some(value) => Ok(value),
-            None => {
-                // For this simplified version, we can't easily add the default
-                // to the actual config, so we'll return an error suggesting using get_or_insert
-                Err(NomlError::key_not_found(key))
-            }
+            None => Err(NomlError::key_not_found(key)),
         }
     }
 
-    /// Get a value or insert a default if it doesn't exist
+    /// Get a value, inserting `default` first if the key doesn't exist
     pub fn get_or_insert<T>(&mut self, key: &str, default: T) -> Result<&Value>
     where
         T: Into<Value>,
@@ -369,9 +368,7 @@ impl Config {
     /// # Ok::<(), noml::NomlError>(())
     /// ```
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        // TODO: Implement proper NOML serialization
-        // For now, we'll create a basic representation
-        let content = self.to_string_representation();
+        let content = self.to_string_representation()?;
         fs::write(path, content)
             .map_err(|e| NomlError::io("Failed to write configuration file".to_string(), e))?;
         Ok(())
@@ -538,79 +535,12 @@ impl Config {
         }
     }
 
-    fn to_string_representation(&self) -> String {
-        // Basic TOML-style output (will be improved in future iterations)
-        self.value_to_string(&self.values, 0, "")
-    }
-
-    fn value_to_string(&self, value: &Value, indent: usize, prefix: &str) -> String {
-        let indent_str = "  ".repeat(indent);
-
-        match value {
-            Value::Table(table) => {
-                let mut result = String::new();
-
-                // First output direct key-value pairs
-                for (key, val) in table {
-                    if !val.is_table() {
-                        result.push_str(&format!(
-                            "{}{} = {}\n",
-                            indent_str,
-                            key,
-                            self.value_to_literal_string(val)
-                        ));
-                    }
-                }
-
-                // Then output nested tables
-                for (key, val) in table {
-                    if val.is_table() {
-                        let full_key = if prefix.is_empty() {
-                            key.clone()
-                        } else {
-                            format!("{prefix}.{key}")
-                        };
-
-                        result.push('\n');
-                        result.push_str(&format!("{indent_str}[{full_key}]\n"));
-                        result.push_str(&self.value_to_string(val, indent, &full_key));
-                    }
-                }
-
-                result
-            }
-            _ => self.value_to_literal_string(value),
-        }
-    }
-
-    #[allow(clippy::only_used_in_recursion)]
-    fn value_to_literal_string(&self, value: &Value) -> String {
-        match value {
-            Value::Null => "null".to_string(),
-            Value::Bool(b) => b.to_string(),
-            Value::Integer(i) => i.to_string(),
-            Value::Float(f) => f.to_string(),
-            Value::String(s) => format!("\"{}\"", s.replace('"', "\\\"")),
-            Value::Array(arr) => {
-                let elements: Vec<String> = arr
-                    .iter()
-                    .map(|v| self.value_to_literal_string(v))
-                    .collect();
-                format!("[{}]", elements.join(", "))
-            }
-            Value::Table(table) => {
-                let entries: Vec<String> = table
-                    .iter()
-                    .map(|(k, v)| format!("{} = {}", k, self.value_to_literal_string(v)))
-                    .collect();
-                format!("{{ {} }}", entries.join(", "))
-            }
-            Value::Size(bytes) => format!("{bytes}B"),
-            Value::Duration(secs) => format!("{secs}s"),
-            Value::Binary(data) => format!("<{} bytes>", data.len()),
-            #[cfg(feature = "chrono")]
-            Value::DateTime(dt) => format!("\"{}\"", dt.format("%Y-%m-%dT%H:%M:%SZ")),
-        }
+    /// Render the values as NOML text that parses back to the same values.
+    fn to_string_representation(&self) -> Result<String> {
+        let table = self.values.as_table()?;
+        let mut out = String::new();
+        write_table_body(&mut out, table, &mut Vec::new())?;
+        Ok(out)
     }
 }
 
@@ -640,8 +570,7 @@ impl Config {
             &source,
             Some(path.as_ref().to_string_lossy().to_string()),
         )?;
-        let mut resolver = crate::resolver::Resolver::new();
-        let values = resolver.resolve(&document)?;
+        let values = document.to_value()?;
 
         Ok(Config {
             document,
@@ -667,7 +596,7 @@ impl Config {
     /// }
     /// ```
     pub async fn save_async<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let content = self.to_string_representation();
+        let content = self.to_string_representation()?;
         tokio::fs::write(path.as_ref(), content)
             .await
             .map_err(|e| NomlError::io(path.as_ref().to_string_lossy().to_string(), e))?;
@@ -750,7 +679,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Enable or disable validation
+    /// Reserved for builder-level validation; currently has no effect.
+    ///
+    /// To check a configuration's structure, build it and call
+    /// [`Config::validate_schema`] with a [`Schema`].
     pub fn validate(mut self, validate: bool) -> Self {
         self.validate = validate;
         self
@@ -778,11 +710,6 @@ impl ConfigBuilder {
             }
         }
 
-        if self.validate {
-            // TODO: Add schema validation to builder tests in future
-            // config.validate_schema(&schema)?;
-        }
-
         config.mark_clean(); // Don't consider defaults as modifications
         Ok(config)
     }
@@ -798,14 +725,162 @@ impl ConfigBuilder {
             }
         }
 
-        if self.validate {
-            // TODO: Add schema validation tests in future
-            // config.validate_schema(&schema)?;
-        }
-
         config.mark_clean();
         Ok(config)
     }
+}
+
+/// True if a value is written as a `[[header]]` array of tables
+fn is_table_array(value: &Value) -> bool {
+    matches!(value, Value::Array(items) if !items.is_empty() && items.iter().all(Value::is_table))
+}
+
+/// Write a table's entries: plain keys first, then `[table]` and `[[array]]`
+/// sections. `path` is the header path of `table`.
+fn write_table_body(
+    out: &mut String,
+    table: &BTreeMap<String, Value>,
+    path: &mut Vec<String>,
+) -> Result<()> {
+    for (key, value) in table {
+        if !value.is_table() && !is_table_array(value) {
+            write_key(out, key);
+            out.push_str(" = ");
+            write_literal(out, value)?;
+            out.push('\n');
+        }
+    }
+    for (key, value) in table {
+        path.push(key.clone());
+        match value {
+            Value::Table(inner) => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push('[');
+                write_path(out, path);
+                out.push_str("]\n");
+                write_table_body(out, inner, path)?;
+            }
+            Value::Array(items) if is_table_array(value) => {
+                for item in items {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str("[[");
+                    write_path(out, path);
+                    out.push_str("]]\n");
+                    write_table_body(out, item.as_table()?, path)?;
+                }
+            }
+            _ => {}
+        }
+        path.pop();
+    }
+    Ok(())
+}
+
+fn write_path(out: &mut String, path: &[String]) {
+    for (i, key) in path.iter().enumerate() {
+        if i > 0 {
+            out.push('.');
+        }
+        write_key(out, key);
+    }
+}
+
+fn write_key(out: &mut String, key: &str) {
+    if crate::tree::is_bare_key(key) {
+        out.push_str(key);
+    } else {
+        write_string(out, key, false);
+    }
+}
+
+/// Write a double-quoted string. `template_safe` escapes `${` as `$${` so the
+/// text is not interpolated when read back.
+fn write_string(out: &mut String, s: &str, template_safe: bool) {
+    out.push('"');
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            '$' if template_safe && chars.peek() == Some(&'{') => out.push_str("$$"),
+            c if c.is_control() => {
+                use std::fmt::Write;
+                let _ = write!(out, "\\u{{{:x}}}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+fn write_literal(out: &mut String, value: &Value) -> Result<()> {
+    use std::fmt::Write;
+    match value {
+        Value::Null => out.push_str("null"),
+        Value::Bool(b) => {
+            let _ = write!(out, "{b}");
+        }
+        Value::Integer(i) => {
+            let _ = write!(out, "{i}");
+        }
+        Value::Float(f) => {
+            if f.is_nan() {
+                out.push_str("nan");
+            } else if f.is_infinite() {
+                out.push_str(if *f > 0.0 { "inf" } else { "-inf" });
+            } else {
+                // Debug keeps a decimal point or exponent, so it reads back as a float
+                let _ = write!(out, "{f:?}");
+            }
+        }
+        Value::String(s) => write_string(out, s, true),
+        Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                write_literal(out, item)?;
+            }
+            out.push(']');
+        }
+        Value::Table(table) => {
+            out.push('{');
+            for (i, (key, item)) in table.iter().enumerate() {
+                out.push_str(if i > 0 { ", " } else { " " });
+                write_key(out, key);
+                out.push_str(" = ");
+                write_literal(out, item)?;
+            }
+            out.push_str(if table.is_empty() { "}" } else { " }" });
+        }
+        Value::Size(bytes) => {
+            let _ = write!(out, "@size(\"{bytes}B\")");
+        }
+        Value::Duration(secs) => {
+            let _ = write!(out, "@duration(\"{secs}s\")");
+        }
+        Value::Binary(data) => {
+            out.push('[');
+            for (i, byte) in data.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let _ = write!(out, "{byte}");
+            }
+            out.push(']');
+        }
+        #[cfg(feature = "chrono")]
+        Value::DateTime(dt) => write_string(out, &dt.to_rfc3339(), true),
+    }
+    Ok(())
 }
 
 #[cfg(test)]

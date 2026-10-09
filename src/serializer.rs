@@ -1,14 +1,15 @@
 //! # Format-Preserving NOML Serializer
 //!
-//! This module provides serialization capabilities that preserve the original
-//! formatting, comments, whitespace, and style of NOML documents. This enables
-//! perfect round-trip editing while maintaining the exact appearance of the
-//! original file.
+//! This module writes a [`Document`] back to NOML text. It keeps what the
+//! parser records: key order, comments (above an entry and at the end of a
+//! line), table and array-of-tables sections, quote styles, and the original
+//! spelling of numbers (`0xFF`, `1_000`). Whitespace and indentation are
+//! normalised. The output always parses back to the same values.
 
 use crate::error::Result;
 use crate::parser::ast::{
-    AstNode, AstValue, Comment, Document, FormatMetadata, FormatStyle, Indentation, Key,
-    LineEnding, StringStyle, TableEntry,
+    AstNode, AstValue, Comment, Document, Indentation, Key, KeySegment, LineEnding, StringStyle,
+    TableEntry,
 };
 use std::fmt::Write;
 
@@ -22,6 +23,17 @@ pub struct Serializer {
     indentation: Indentation,
     /// Default line ending style
     line_ending: LineEnding,
+}
+
+/// True for a table written as a `[section]`
+fn is_section(node: &AstNode) -> bool {
+    matches!(node.value, AstValue::Table { inline: false, .. })
+}
+
+/// True for an array written as `[[section]]` blocks
+fn is_section_array(node: &AstNode) -> bool {
+    matches!(&node.value, AstValue::Array { elements, .. }
+        if !elements.is_empty() && elements.iter().all(is_section))
 }
 
 impl Serializer {
@@ -45,182 +57,265 @@ impl Serializer {
         }
     }
 
-    /// Serialize a document to a string, preserving all formatting
+    /// Serialize a document to a string
     pub fn serialize_document(&mut self, document: &Document) -> Result<String> {
         self.output.clear();
+        self.indent_level = 0;
 
-        // Add leading whitespace from root format metadata
-        self.output
-            .push_str(&document.root.format.leading_whitespace);
+        let root = &document.root;
+        self.output.push_str(&root.format.leading_whitespace);
+        for comment in &root.comments.before {
+            self.serialize_comment(comment);
+            self.add_line_ending();
+        }
 
-        // Serialize the root node (typically a table)
-        self.serialize_ast_node(&document.root)?;
+        match &root.value {
+            AstValue::Table { entries, .. } => self.serialize_section_body(entries, &[])?,
+            _ => {
+                self.serialize_ast_node(root)?;
+                self.add_line_ending();
+            }
+        }
 
-        // Add trailing whitespace from root format metadata
-        self.output
-            .push_str(&document.root.format.trailing_whitespace);
+        for comment in &root.comments.after {
+            self.serialize_comment(comment);
+            self.add_line_ending();
+        }
+        self.output.push_str(&root.format.trailing_whitespace);
 
-        Ok(self.output.clone())
+        Ok(std::mem::take(&mut self.output))
     }
 
-    /// Serialize a single table entry with formatting preservation
-    fn serialize_table_entry(&mut self, entry: &TableEntry) -> Result<()> {
-        // Add leading whitespace from format metadata
-        self.output.push_str(&entry.value.format.leading_whitespace);
+    /// Write a table's entries: plain `key = value` lines first, then nested
+    /// `[section]` and `[[section]]` blocks. `path` is the section's own key path.
+    fn serialize_section_body(
+        &mut self,
+        entries: &[TableEntry],
+        path: &[KeySegment],
+    ) -> Result<()> {
+        for entry in entries {
+            if !is_section(&entry.value) && !is_section_array(&entry.value) {
+                self.serialize_table_entry(entry)?;
+            }
+        }
 
-        // Add comments before the entry
+        for entry in entries {
+            let mut full: Vec<KeySegment> = path.to_vec();
+            full.extend(entry.key.segments.iter().cloned());
+
+            if let AstValue::Table {
+                entries: inner,
+                inline: false,
+            } = &entry.value.value
+            {
+                self.serialize_header(&full, entry, false);
+                self.serialize_section_body(inner, &full)?;
+            } else if is_section_array(&entry.value) {
+                if let AstValue::Array { elements, .. } = &entry.value.value {
+                    for (i, element) in elements.iter().enumerate() {
+                        if i == 0 {
+                            self.serialize_header(&full, entry, true);
+                        } else {
+                            self.start_block();
+                            self.output.push_str("[[");
+                            self.serialize_key_segments(&full);
+                            self.output.push_str("]]");
+                            self.add_line_ending();
+                        }
+                        if let AstValue::Table { entries: inner, .. } = &element.value {
+                            self.serialize_section_body(inner, &full)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Blank line between blocks (but not at the very start)
+    fn start_block(&mut self) {
+        if !self.output.is_empty() && !self.output.ends_with("\n\n") {
+            self.add_line_ending();
+        }
+    }
+
+    fn serialize_header(&mut self, path: &[KeySegment], entry: &TableEntry, array: bool) {
+        self.start_block();
+        for comment in &entry.comments.before {
+            self.serialize_comment(comment);
+            self.add_line_ending();
+        }
+        self.output.push_str(if array { "[[" } else { "[" });
+        self.serialize_key_segments(path);
+        self.output.push_str(if array { "]]" } else { "]" });
+        if let Some(ref comment) = entry.comments.inline {
+            self.output.push(' ');
+            self.serialize_comment(comment);
+        }
+        self.add_line_ending();
+    }
+
+    /// Serialize a single `key = value` line with its comments
+    fn serialize_table_entry(&mut self, entry: &TableEntry) -> Result<()> {
         for comment in &entry.comments.before {
             self.serialize_comment(comment);
             self.add_line_ending();
         }
 
-        // Serialize the key
         self.serialize_key(&entry.key);
-
-        // Add equals sign with proper spacing
-        if let FormatStyle::KeyValue { equals_spacing, .. } = &entry.value.format.format_style {
-            self.output.push_str(&equals_spacing.before);
-            self.output.push('=');
-            self.output.push_str(&equals_spacing.after);
-        } else {
-            self.output.push_str(" = ");
-        }
-
-        // Serialize the value
+        self.output.push_str(" = ");
         self.serialize_ast_node(&entry.value)?;
 
-        // Add inline comment if present
         if let Some(ref comment) = entry.comments.inline {
             self.output.push(' ');
             self.serialize_comment(comment);
         }
-
-        // Add line ending
         self.add_line_ending();
 
-        // Add comments after the entry
         for comment in &entry.comments.after {
             self.serialize_comment(comment);
             self.add_line_ending();
         }
-
-        // Add trailing whitespace
-        self.output
-            .push_str(&entry.value.format.trailing_whitespace);
-
         Ok(())
     }
 
-    /// Serialize a key with proper quoting and formatting
+    /// Serialize a key with proper quoting
     fn serialize_key(&mut self, key: &Key) {
-        for (i, segment) in key.segments.iter().enumerate() {
+        self.serialize_key_segments(&key.segments);
+    }
+
+    fn serialize_key_segments(&mut self, segments: &[KeySegment]) {
+        for (i, segment) in segments.iter().enumerate() {
             if i > 0 {
                 self.output.push('.');
             }
-
-            if segment.quoted {
-                // Use the original quote style if available
-                let quote_char = match segment.quote_style {
-                    Some(StringStyle::Double) => '"',
-                    Some(StringStyle::Single) => '\'',
-                    _ => '"', // Default to double quotes
-                };
-                self.output.push(quote_char);
+            let bare_ok = crate::tree::is_bare_key(&segment.name);
+            if !segment.quoted && bare_ok {
                 self.output.push_str(&segment.name);
-                self.output.push(quote_char);
+            } else if segment.quote_style == Some(StringStyle::Single)
+                && literal_ok(&segment.name, false)
+            {
+                self.output.push('\'');
+                self.output.push_str(&segment.name);
+                self.output.push('\'');
             } else {
-                self.output.push_str(&segment.name);
+                self.write_basic_string(&segment.name, false);
             }
         }
     }
 
-    /// Serialize an AST node with full formatting preservation
+    /// Serialize an AST node in value position
     fn serialize_ast_node(&mut self, node: &AstNode) -> Result<()> {
         match &node.value {
             AstValue::Null => self.output.push_str("null"),
-            AstValue::Bool(b) => self.output.push_str(&b.to_string()),
-            AstValue::Integer { raw, .. } => self.output.push_str(raw),
-            AstValue::Float { raw, .. } => self.output.push_str(raw),
-            AstValue::String {
-                value,
-                style,
-                has_escapes,
-            } => {
-                self.serialize_string(value, style, *has_escapes);
-            }
-            AstValue::Array { elements, .. } => {
-                self.serialize_array(elements, &node.format)?;
-            }
-            AstValue::Table { entries, inline } => {
-                if *inline {
-                    self.serialize_inline_table(entries)?;
+            AstValue::Bool(b) => self.output.push_str(if *b { "true" } else { "false" }),
+            AstValue::Integer { value, raw } => {
+                if raw.is_empty() {
+                    let _ = write!(self.output, "{value}");
                 } else {
-                    self.serialize_table(entries)?;
+                    self.output.push_str(raw);
                 }
+            }
+            AstValue::Float { value, raw } => {
+                if !raw.is_empty() {
+                    self.output.push_str(raw);
+                } else if value.is_nan() {
+                    self.output.push_str("nan");
+                } else if value.is_infinite() {
+                    self.output
+                        .push_str(if *value > 0.0 { "inf" } else { "-inf" });
+                } else {
+                    let _ = write!(self.output, "{value:?}");
+                }
+            }
+            AstValue::String { value, style, .. } => {
+                self.serialize_string(value, style);
+            }
+            AstValue::Array {
+                elements,
+                multiline,
+                trailing_comma,
+            } => {
+                self.serialize_array(node, elements, *multiline, *trailing_comma)?;
+            }
+            AstValue::Table { entries, .. } => {
+                // In value position every table is written inline
+                self.serialize_inline_table(entries)?;
             }
             AstValue::FunctionCall { name, args } => {
-                self.serialize_function_call(name, args)?;
+                self.output.push_str(name);
+                self.serialize_args(args)?;
             }
             AstValue::Interpolation { path } => {
-                write!(self.output, "${{{path}}}").map_err(|e| {
-                    crate::error::NomlError::validation(format!(
-                        "Failed to write interpolation: {e}"
-                    ))
-                })?;
+                self.output.push_str("${");
+                self.output.push_str(path);
+                self.output.push('}');
             }
             AstValue::Include { path } => {
-                write!(self.output, "include \"{path}\"").map_err(|e| {
-                    crate::error::NomlError::validation(format!("Failed to write include: {e}"))
-                })?;
+                self.output.push_str("include ");
+                self.write_basic_string(path, false);
             }
             AstValue::Native { type_name, args } => {
-                write!(self.output, "@{type_name}(").map_err(|e| {
-                    crate::error::NomlError::validation(format!("Failed to write native type: {e}"))
-                })?;
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        self.output.push_str(", ");
-                    }
-                    self.serialize_ast_node(arg)?;
-                }
-                self.output.push(')');
+                self.output.push('@');
+                self.output.push_str(type_name);
+                self.serialize_args(args)?;
             }
         }
         Ok(())
     }
 
-    /// Serialize a string value with proper quoting and escaping
-    fn serialize_string(&mut self, value: &str, style: &StringStyle, has_escapes: bool) {
+    fn serialize_args(&mut self, args: &[AstNode]) -> Result<()> {
+        self.output.push('(');
+        for (i, arg) in args.iter().enumerate() {
+            if i > 0 {
+                self.output.push_str(", ");
+            }
+            self.serialize_ast_node(arg)?;
+        }
+        self.output.push(')');
+        Ok(())
+    }
+
+    /// Serialize a string in its original style when the value allows it,
+    /// otherwise as an escaped double-quoted string.
+    ///
+    /// Values in the AST are interpolation templates, so `${` is written as is.
+    fn serialize_string(&mut self, value: &str, style: &StringStyle) {
         match style {
-            StringStyle::Double => {
-                self.output.push('"');
-                if has_escapes {
-                    self.escape_string(value, '"');
-                } else {
-                    self.output.push_str(value);
-                }
-                self.output.push('"');
-            }
-            StringStyle::Single => {
-                self.output.push('\'');
-                if has_escapes {
-                    self.escape_string(value, '\'');
-                } else {
-                    self.output.push_str(value);
-                }
-                self.output.push('\'');
-            }
+            StringStyle::Double => self.write_basic_string(value, false),
             StringStyle::TripleDouble => {
                 self.output.push_str("\"\"\"");
-                self.output.push_str(value);
+                if value.starts_with('\n') || value.starts_with("\r\n") {
+                    // The parser drops a newline right after the opening quotes
+                    self.output.push('\n');
+                }
+                for ch in value.chars() {
+                    match ch {
+                        '\\' => self.output.push_str("\\\\"),
+                        '"' => self.output.push_str("\\\""),
+                        '\n' | '\t' | '\r' => self.output.push(ch),
+                        c if c.is_control() => {
+                            let _ = write!(self.output, "\\u{{{:x}}}", c as u32);
+                        }
+                        c => self.output.push(c),
+                    }
+                }
                 self.output.push_str("\"\"\"");
             }
-            StringStyle::TripleSingle => {
+            StringStyle::Single if literal_ok(value, false) => {
+                self.output.push('\'');
+                self.output.push_str(value);
+                self.output.push('\'');
+            }
+            StringStyle::TripleSingle if literal_ok(value, true) => {
                 self.output.push_str("'''");
+                if value.starts_with('\n') || value.starts_with("\r\n") {
+                    self.output.push('\n');
+                }
                 self.output.push_str(value);
                 self.output.push_str("'''");
             }
-            StringStyle::Raw { hashes } => {
+            StringStyle::Raw { hashes } if raw_ok(value, *hashes) => {
                 self.output.push('r');
                 for _ in 0..*hashes {
                     self.output.push('#');
@@ -232,76 +327,88 @@ impl Serializer {
                     self.output.push('#');
                 }
             }
+            // The value cannot be written in its original style; fall back to
+            // an escaped basic string. Literal and raw strings are never
+            // interpolated, so protect `${` from being read as interpolation.
+            _ => self.write_basic_string(value, true),
         }
     }
 
-    /// Escape a string value for serialization
-    fn escape_string(&mut self, value: &str, quote_char: char) {
-        for ch in value.chars() {
+    /// Write `"..."` with escapes. With `protect_templates`, `${` is written as
+    /// `$${` so it reads back as literal text.
+    fn write_basic_string(&mut self, value: &str, protect_templates: bool) {
+        self.output.push('"');
+        let mut chars = value.chars().peekable();
+        while let Some(ch) = chars.next() {
             match ch {
                 '\n' => self.output.push_str("\\n"),
                 '\t' => self.output.push_str("\\t"),
                 '\r' => self.output.push_str("\\r"),
                 '\\' => self.output.push_str("\\\\"),
-                '"' if quote_char == '"' => self.output.push_str("\\\""),
-                '\'' if quote_char == '\'' => self.output.push_str("\\'"),
+                '"' => self.output.push_str("\\\""),
+                '$' if protect_templates && chars.peek() == Some(&'{') => {
+                    self.output.push_str("$$")
+                }
+                c if c.is_control() => {
+                    let _ = write!(self.output, "\\u{{{:x}}}", c as u32);
+                }
                 c => self.output.push(c),
             }
         }
+        self.output.push('"');
     }
 
-    /// Serialize an array with formatting preservation
-    fn serialize_array(&mut self, elements: &[AstNode], format: &FormatMetadata) -> Result<()> {
+    /// Serialize an array, one element per line if it was written that way
+    fn serialize_array(
+        &mut self,
+        node: &AstNode,
+        elements: &[AstNode],
+        multiline: bool,
+        trailing_comma: bool,
+    ) -> Result<()> {
+        let has_comments = !node.comments.after.is_empty()
+            || elements
+                .iter()
+                .any(|e| !e.comments.before.is_empty() || e.comments.inline.is_some());
         self.output.push('[');
 
-        if let FormatStyle::Array {
-            multiline,
-            trailing_comma,
-            bracket_spacing,
-        } = &format.format_style
-        {
-            self.output.push_str(&bracket_spacing.after_open);
-
-            if *multiline {
-                // Multi-line array format
-                self.add_line_ending();
-                self.indent_level += 1;
-
-                for (i, element) in elements.iter().enumerate() {
+        if multiline || has_comments {
+            self.indent_level += 1;
+            self.add_line_ending();
+            for (i, element) in elements.iter().enumerate() {
+                for comment in &element.comments.before {
                     self.add_indentation();
-                    self.serialize_ast_node(element)?;
-
-                    if i < elements.len() - 1 || *trailing_comma {
-                        self.output.push(',');
-                    }
-
+                    self.serialize_comment(comment);
                     self.add_line_ending();
                 }
-
-                self.indent_level -= 1;
                 self.add_indentation();
-            } else {
-                // Single-line array format
-                for (i, element) in elements.iter().enumerate() {
-                    if i > 0 {
-                        self.output.push_str(", ");
-                    }
-                    self.serialize_ast_node(element)?;
-                }
-
-                if *trailing_comma && !elements.is_empty() {
+                self.serialize_ast_node(element)?;
+                // Always end lines with a comma so inline comments stay attached
+                if i + 1 < elements.len() || trailing_comma || element.comments.inline.is_some() {
                     self.output.push(',');
                 }
+                if let Some(ref comment) = element.comments.inline {
+                    self.output.push(' ');
+                    self.serialize_comment(comment);
+                }
+                self.add_line_ending();
             }
-
-            self.output.push_str(&bracket_spacing.before_close);
+            for comment in &node.comments.after {
+                self.add_indentation();
+                self.serialize_comment(comment);
+                self.add_line_ending();
+            }
+            self.indent_level -= 1;
+            self.add_indentation();
         } else {
-            // Default array formatting
             for (i, element) in elements.iter().enumerate() {
                 if i > 0 {
                     self.output.push_str(", ");
                 }
                 self.serialize_ast_node(element)?;
+            }
+            if trailing_comma && !elements.is_empty() {
+                self.output.push(',');
             }
         }
 
@@ -311,44 +418,20 @@ impl Serializer {
 
     /// Serialize an inline table
     fn serialize_inline_table(&mut self, entries: &[TableEntry]) -> Result<()> {
+        if entries.is_empty() {
+            self.output.push_str("{}");
+            return Ok(());
+        }
         self.output.push_str("{ ");
-
         for (i, entry) in entries.iter().enumerate() {
             if i > 0 {
                 self.output.push_str(", ");
             }
-
             self.serialize_key(&entry.key);
             self.output.push_str(" = ");
             self.serialize_ast_node(&entry.value)?;
         }
-
         self.output.push_str(" }");
-        Ok(())
-    }
-
-    /// Serialize a regular table (not used for inline tables)
-    fn serialize_table(&mut self, entries: &[TableEntry]) -> Result<()> {
-        for entry in entries {
-            self.serialize_table_entry(entry)?;
-        }
-        Ok(())
-    }
-
-    /// Serialize a function call
-    fn serialize_function_call(&mut self, name: &str, args: &[AstNode]) -> Result<()> {
-        write!(self.output, "{name}(").map_err(|e| {
-            crate::error::NomlError::validation(format!("Failed to write function call: {e}"))
-        })?;
-
-        for (i, arg) in args.iter().enumerate() {
-            if i > 0 {
-                self.output.push_str(", ");
-            }
-            self.serialize_ast_node(arg)?;
-        }
-
-        self.output.push(')');
         Ok(())
     }
 
@@ -372,13 +455,37 @@ impl Serializer {
 
     /// Add indentation for the current level
     fn add_indentation(&mut self) {
-        let indent_str = if self.indentation.use_tabs {
-            "\t".repeat(self.indent_level)
+        if self.indentation.use_tabs {
+            for _ in 0..self.indent_level {
+                self.output.push('\t');
+            }
         } else {
-            " ".repeat(self.indent_level * self.indentation.size)
-        };
-        self.output.push_str(&indent_str);
+            for _ in 0..self.indent_level * self.indentation.size {
+                self.output.push(' ');
+            }
+        }
     }
+}
+
+/// Can `value` be written as a literal (single-quoted) string?
+fn literal_ok(value: &str, multiline: bool) -> bool {
+    if multiline {
+        !value.contains("'''")
+            && !value.ends_with('\'')
+            && !value
+                .chars()
+                .any(|c| c.is_control() && c != '\n' && c != '\t' && c != '\r')
+    } else {
+        !value.contains('\'') && !value.chars().any(|c| c.is_control() && c != '\t')
+    }
+}
+
+/// Can `value` be written as a raw string with `hashes` hashes?
+fn raw_ok(value: &str, hashes: usize) -> bool {
+    let closing: String = std::iter::once('"')
+        .chain(std::iter::repeat_n('#', hashes))
+        .collect();
+    !value.contains(&closing)
 }
 
 impl Default for Serializer {

@@ -334,6 +334,8 @@ impl Value {
                 .parse::<i64>()
                 .map_err(|_| NomlError::type_error(s, "integer", "string")),
             Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
+            Value::Size(bytes) => i64::try_from(*bytes)
+                .map_err(|_| NomlError::type_error(bytes.to_string(), "integer", "size")),
             _ => Err(NomlError::type_error(
                 format!("<{}>", self.type_name()),
                 "integer",
@@ -348,6 +350,8 @@ impl Value {
         match self {
             Value::Float(f) => Ok(*f),
             Value::Integer(i) => Ok(*i as f64),
+            Value::Duration(seconds) => Ok(*seconds),
+            Value::Size(bytes) => Ok(*bytes as f64),
             Value::String(s) => s
                 .parse::<f64>()
                 .map_err(|_| NomlError::type_error(s, "float", "string")),

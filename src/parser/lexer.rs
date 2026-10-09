@@ -146,16 +146,12 @@ pub struct Lexer<'a> {
     input: &'a str,
     /// Current byte position
     pos: usize,
-    /// Current character position (for O(1) access)
-    char_pos: usize,
     /// Current line number (1-indexed)
     line: usize,
-    /// Current column number (1-indexed)
+    /// Current column number (1-indexed, in characters)
     column: usize,
     /// Start position of current token
     token_start: usize,
-    /// Start character position of current token
-    token_start_char_pos: usize,
     /// Start line of current token
     token_start_line: usize,
     /// Start column of current token
@@ -168,11 +164,9 @@ impl<'a> Lexer<'a> {
         Self {
             input,
             pos: 0,
-            char_pos: 0,
             line: 1,
             column: 1,
             token_start: 0,
-            token_start_char_pos: 0,
             token_start_line: 1,
             token_start_column: 1,
         }
@@ -190,7 +184,7 @@ impl<'a> Lexer<'a> {
         match ch {
             // Whitespace (spaces, tabs, carriage returns)
             ' ' | '\t' | '\r' => {
-                while matches!(self.current_char(), ' ' | '\t' | '\r') && !self.is_eof() {
+                while !self.is_eof() && matches!(self.current_char(), ' ' | '\t' | '\r') {
                     self.advance();
                 }
                 Ok(self.make_token(TokenKind::Whitespace))
@@ -204,57 +198,54 @@ impl<'a> Lexer<'a> {
             '#' => self.lex_comment(),
 
             // Strings
-            '"' => self.lex_string(StringStyle::Double),
-            '\'' => self.lex_string(StringStyle::Single),
+            '"' => {
+                if self.rest().starts_with("\"\"\"") {
+                    self.lex_basic_string(true)
+                } else {
+                    self.lex_basic_string(false)
+                }
+            }
+            '\'' => {
+                if self.rest().starts_with("'''") {
+                    self.lex_literal_string(true)
+                } else {
+                    self.lex_literal_string(false)
+                }
+            }
             'r' if self.peek_char() == Some('"') || self.peek_char() == Some('#') => {
                 self.lex_raw_string()
             }
 
+            // Signed special floats: +inf, -inf, +nan, -nan
+            '+' | '-' if self.signed_special_float() => {
+                self.advance(); // sign
+                for _ in 0..3 {
+                    self.advance();
+                }
+                let raw = &self.input[self.token_start..self.pos];
+                let value = match raw {
+                    "+inf" => f64::INFINITY,
+                    "-inf" => f64::NEG_INFINITY,
+                    _ => f64::NAN,
+                };
+                Ok(self.make_token(TokenKind::Float { value, raw }))
+            }
+
             // Numbers
             '0'..='9' => self.lex_number(),
-            '-' if matches!(self.peek_char(), Some('0'..='9')) => self.lex_number(),
+            '-' | '+' if matches!(self.peek_char(), Some('0'..='9')) => self.lex_number(),
 
             // Symbols
-            '=' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::Equals))
-            }
-            '.' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::Dot))
-            }
-            ',' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::Comma))
-            }
-            '[' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::LeftBracket))
-            }
-            ']' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::RightBracket))
-            }
-            '{' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::LeftBrace))
-            }
-            '}' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::RightBrace))
-            }
-            '(' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::LeftParen))
-            }
-            ')' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::RightParen))
-            }
-            '@' => {
-                self.advance();
-                Ok(self.make_token(TokenKind::At))
-            }
+            '=' => self.single(TokenKind::Equals),
+            '.' => self.single(TokenKind::Dot),
+            ',' => self.single(TokenKind::Comma),
+            '[' => self.single(TokenKind::LeftBracket),
+            ']' => self.single(TokenKind::RightBracket),
+            '{' => self.single(TokenKind::LeftBrace),
+            '}' => self.single(TokenKind::RightBrace),
+            '(' => self.single(TokenKind::LeftParen),
+            ')' => self.single(TokenKind::RightParen),
+            '@' => self.single(TokenKind::At),
 
             // Interpolation
             '$' if self.peek_char() == Some('{') => {
@@ -273,30 +264,20 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Tokenize the entire input into a vector of tokens
+    /// Tokenize the entire input into a vector of tokens.
+    ///
+    /// Whitespace and newline tokens are dropped; comments are kept so the
+    /// parser can attach them to the surrounding entries.
     pub fn tokenize(&mut self) -> Result<Vec<Token<'a>>> {
-        let mut tokens = Vec::new();
+        // Rough guess: one significant token per four bytes of input.
+        let mut tokens = Vec::with_capacity(self.input.len() / 4 + 1);
 
         loop {
             let token = self.next_token()?;
             let is_eof = matches!(token.kind, TokenKind::Eof);
 
-            // Skip whitespace and newline tokens
             match token.kind {
                 TokenKind::Whitespace | TokenKind::Newline => {}
-                TokenKind::String { ref value, .. } => {
-                    // Check if string contains interpolation and add InterpolationStart token
-                    if value.contains("${") {
-                        // Add InterpolationStart token for test compatibility
-                        let interpolation_token = Token {
-                            kind: TokenKind::InterpolationStart,
-                            span: token.span, // Now using Copy instead of clone
-                            text: "${",
-                        };
-                        tokens.push(interpolation_token);
-                    }
-                    tokens.push(token);
-                }
                 _ => tokens.push(token),
             }
 
@@ -311,14 +292,15 @@ impl<'a> Lexer<'a> {
     // Helper methods
 
     /// Start tracking a new token
+    #[inline]
     fn start_token(&mut self) {
         self.token_start = self.pos;
-        self.token_start_char_pos = self.char_pos;
         self.token_start_line = self.line;
         self.token_start_column = self.column;
     }
 
     /// Create a token with the current span
+    #[inline]
     fn make_token(&self, kind: TokenKind<'a>) -> Token<'a> {
         Token {
             kind,
@@ -334,40 +316,49 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Get the current character without advancing
+    /// Consume one character and emit a token of the given kind
+    #[inline]
+    fn single(&mut self, kind: TokenKind<'a>) -> Result<Token<'a>> {
+        self.advance();
+        Ok(self.make_token(kind))
+    }
+
+    /// The unconsumed part of the input
+    #[inline]
+    fn rest(&self) -> &'a str {
+        &self.input[self.pos..]
+    }
+
+    /// Get the current character without advancing ('\0' at end of input)
     #[inline]
     fn current_char(&self) -> char {
-        self.input.chars().nth(self.char_pos()).unwrap_or('\0')
+        match self.input.as_bytes().get(self.pos) {
+            Some(&b) if b < 0x80 => b as char,
+            Some(_) => self.rest().chars().next().unwrap_or('\0'),
+            None => '\0',
+        }
     }
 
-    /// Peek at the next character without advancing
+    /// Peek at the character after the current one
     #[inline]
     fn peek_char(&self) -> Option<char> {
-        self.input.chars().nth(self.char_pos() + 1)
-    }
-
-    /// Get current character position (not byte position) - O(1) cached
-    #[inline]
-    fn char_pos(&self) -> usize {
-        self.char_pos
+        let mut chars = self.rest().chars();
+        chars.next();
+        chars.next()
     }
 
     /// Advance by one character
     #[inline]
     fn advance(&mut self) -> Option<char> {
-        if let Some(ch) = self.input[self.pos..].chars().next() {
-            self.pos += ch.len_utf8();
-            self.char_pos += 1;
-            if ch == '\n' {
-                self.line += 1;
-                self.column = 1;
-            } else {
-                self.column += 1;
-            }
-            Some(ch)
+        let ch = self.rest().chars().next()?;
+        self.pos += ch.len_utf8();
+        if ch == '\n' {
+            self.line += 1;
+            self.column = 1;
         } else {
-            None
+            self.column += 1;
         }
+        Some(ch)
     }
 
     /// Check if we're at end of file
@@ -376,17 +367,14 @@ impl<'a> Lexer<'a> {
         self.pos >= self.input.len()
     }
 
-    /// Skip whitespace (but not newlines, which are significant)
-    #[allow(dead_code)]
-    fn skip_whitespace(&mut self) {
-        while let Some(ch) = self.input[self.pos..].chars().next() {
-            match ch {
-                ' ' | '\t' | '\r' => {
-                    self.advance();
-                }
-                _ => break,
-            }
-        }
+    /// True if the input at the current position is `+inf`, `-inf`, `+nan` or `-nan`
+    fn signed_special_float(&self) -> bool {
+        let rest = &self.rest()[1..];
+        (rest.starts_with("inf") || rest.starts_with("nan"))
+            && !rest[3..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-')
     }
 
     /// Lex a comment starting with #
@@ -394,143 +382,273 @@ impl<'a> Lexer<'a> {
         self.advance(); // Skip #
 
         let start_pos = self.pos;
-        while let Some(ch) = self.input[self.pos..].chars().next() {
-            if ch == '\n' {
-                break;
-            }
-            self.advance();
-        }
+        let len = self.rest().find('\n').unwrap_or(self.rest().len());
+        let comment_slice = &self.input[start_pos..start_pos + len];
+        // Comments never contain newlines, so only the column moves.
+        self.column += comment_slice.chars().count();
+        self.pos += len;
 
-        // Use string slice and only allocate when trimming is needed
-        let comment_slice = &self.input[start_pos..self.pos];
         let text = comment_slice.trim_start().to_string();
 
         Ok(self.make_token(TokenKind::Comment { text }))
     }
 
-    /// Lex a string literal
-    fn lex_string(&mut self, style: StringStyle) -> Result<Token<'a>> {
-        let quote_char = match style {
-            StringStyle::Double => '"',
-            StringStyle::Single => '\'',
-            _ => unreachable!(),
-        };
+    /// Error for a string that runs into the end of the input
+    fn unterminated(&self, what: &str) -> NomlError {
+        NomlError::parse(
+            format!("Unterminated {what} (opened here)"),
+            self.token_start_line,
+            self.token_start_column,
+        )
+    }
 
-        self.advance(); // Skip opening quote
+    /// Skip a newline that directly follows the opening delimiter of a
+    /// multi-line string (TOML trims it).
+    fn skip_leading_newline(&mut self) {
+        if self.rest().starts_with("\r\n") {
+            self.advance();
+            self.advance();
+        } else if self.rest().starts_with('\n') {
+            self.advance();
+        }
+    }
+
+    /// Lex a basic (double-quoted) string, single or multi-line.
+    ///
+    /// Escapes are resolved here. `${...}` is kept as plain text; the resolver
+    /// expands it later.
+    fn lex_basic_string(&mut self, multiline: bool) -> Result<Token<'a>> {
+        let delim = if multiline { 3 } else { 1 };
+        for _ in 0..delim {
+            self.advance();
+        }
+        if multiline {
+            self.skip_leading_newline();
+        }
 
         let mut value = String::new();
+        let mut seg_start = self.pos;
 
-        let mut found_closing_quote = false;
-        while !self.is_eof() {
+        loop {
+            if self.is_eof() {
+                return Err(self.unterminated("string literal"));
+            }
             let ch = self.current_char();
 
-            if ch == quote_char {
-                self.advance(); // Skip closing quote
-                found_closing_quote = true;
-                break;
+            if ch == '"' {
+                if !multiline {
+                    value.push_str(&self.input[seg_start..self.pos]);
+                    self.advance();
+                    break;
+                }
+                if self.rest().starts_with("\"\"\"") {
+                    // Up to two quotes may sit right before the closing delimiter.
+                    let run = self
+                        .rest()
+                        .bytes()
+                        .take_while(|b| *b == b'"')
+                        .count()
+                        .min(5);
+                    value.push_str(&self.input[seg_start..self.pos]);
+                    for _ in 3..run {
+                        value.push('"');
+                    }
+                    for _ in 0..run {
+                        self.advance();
+                    }
+                    break;
+                }
+                self.advance();
+                continue;
             }
 
             if ch == '\\' {
-                self.advance(); // Skip backslash
+                value.push_str(&self.input[seg_start..self.pos]);
+                self.advance(); // backslash
 
-                if self.is_eof() {
-                    return Err(NomlError::parse(
-                        "Unterminated string escape",
-                        self.line,
-                        self.column,
-                    ));
-                }
-
-                match self.current_char() {
-                    'n' => value.push('\n'),
-                    't' => value.push('\t'),
-                    'r' => value.push('\r'),
-                    '\\' => value.push('\\'),
-                    '"' => value.push('"'),
-                    '\'' => value.push('\''),
-                    '0' => value.push('\0'),
-                    'u' => {
-                        // Unicode escape \u{1234}
+                if multiline && self.at_line_ending_backslash() {
+                    // Line-ending backslash: drop the newline and leading
+                    // whitespace of the following lines.
+                    while !self.is_eof() && matches!(self.current_char(), ' ' | '\t' | '\r' | '\n')
+                    {
                         self.advance();
-                        if self.current_char() != '{' {
-                            return Err(NomlError::parse(
-                                "Invalid unicode escape: expected '{'",
-                                self.line,
-                                self.column,
-                            ));
-                        }
-                        self.advance();
-
-                        let start_pos = self.pos;
-                        while !self.is_eof() && self.current_char() != '}' {
-                            self.advance();
-                        }
-
-                        if self.current_char() != '}' {
-                            return Err(NomlError::parse(
-                                "Unterminated unicode escape",
-                                self.line,
-                                self.column,
-                            ));
-                        }
-
-                        let unicode_slice = &self.input[start_pos..self.pos];
-                        let code = u32::from_str_radix(unicode_slice, 16).map_err(|_| {
-                            NomlError::parse("Invalid unicode escape value", self.line, self.column)
-                        })?;
-
-                        if let Some(unicode_char) = char::from_u32(code) {
-                            value.push(unicode_char);
-                        } else {
-                            return Err(NomlError::parse(
-                                "Invalid unicode code point",
-                                self.line,
-                                self.column,
-                            ));
-                        }
                     }
-                    other => {
-                        return Err(NomlError::parse(
-                            format!("Invalid escape sequence: \\{other}"),
-                            self.line,
-                            self.column,
-                        ));
-                    }
-                }
-                self.advance();
-            } else if ch == '$' && self.peek_char() == Some('{') {
-                // Found interpolation start - need to handle this properly
-                // For now, emit the string up to this point and then the interpolation token
-                // This is a simplified implementation for test compatibility
-                if !value.is_empty() {
-                    // We have a partial string - this needs complex handling
-                    // For now just include the $ in the string to pass basic tests
-                    value.push(ch);
-                    self.advance();
                 } else {
-                    // String starts with interpolation - add it as regular chars for now
-                    value.push(ch);
-                    self.advance();
+                    self.lex_escape(&mut value)?;
                 }
-            } else {
-                value.push(ch);
-                self.advance();
+                seg_start = self.pos;
+                continue;
             }
+
+            self.advance();
         }
 
-        // Check if we found closing quote or reached EOF
-        if !found_closing_quote {
+        let style = if multiline {
+            StringStyle::TripleDouble
+        } else {
+            StringStyle::Double
+        };
+        Ok(self.make_token(TokenKind::String { value, style }))
+    }
+
+    /// After a backslash in a multi-line basic string: is the rest of the line blank?
+    fn at_line_ending_backslash(&self) -> bool {
+        for b in self.rest().bytes() {
+            match b {
+                b' ' | b'\t' | b'\r' => continue,
+                b'\n' => return true,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// Resolve one escape sequence (the backslash is already consumed)
+    fn lex_escape(&mut self, value: &mut String) -> Result<()> {
+        if self.is_eof() {
             return Err(NomlError::parse(
-                "Unterminated string literal",
+                "Unterminated string escape",
                 self.line,
                 self.column,
             ));
         }
+        let (line, column) = (self.line, self.column.saturating_sub(1));
+        let ch = self.current_char();
+        match ch {
+            'n' => value.push('\n'),
+            't' => value.push('\t'),
+            'r' => value.push('\r'),
+            'b' => value.push('\u{8}'),
+            'f' => value.push('\u{c}'),
+            'e' => value.push('\u{1b}'),
+            '\\' => value.push('\\'),
+            '"' => value.push('"'),
+            '\'' => value.push('\''),
+            '0' => value.push('\0'),
+            'u' | 'U' => {
+                self.advance();
+                let digits = if ch == 'u' && self.current_char() == '{' {
+                    // \u{1F600}
+                    self.advance();
+                    let start = self.pos;
+                    let len = self.rest().find('}').ok_or_else(|| {
+                        NomlError::parse("Unterminated unicode escape", line, column)
+                    })?;
+                    let digits = &self.input[start..start + len];
+                    if digits.is_empty()
+                        || digits.len() > 6
+                        || !digits.bytes().all(|b| b.is_ascii_hexdigit())
+                    {
+                        return Err(NomlError::parse(
+                            format!("Invalid unicode escape: \\u{{{digits}}}"),
+                            line,
+                            column,
+                        ));
+                    }
+                    for _ in 0..=digits.chars().count() {
+                        self.advance(); // digits and the closing brace
+                    }
+                    digits
+                } else {
+                    // \uXXXX or \UXXXXXXXX
+                    let want = if ch == 'u' { 4 } else { 8 };
+                    let start = self.pos;
+                    let digits = self.rest().get(..want).unwrap_or("");
+                    if digits.len() != want || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+                        return Err(NomlError::parse(
+                            format!("Invalid unicode escape: \\{ch} needs {want} hex digits"),
+                            line,
+                            column,
+                        ));
+                    }
+                    for _ in 0..want {
+                        self.advance();
+                    }
+                    &self.input[start..start + want]
+                };
+                let code = u32::from_str_radix(digits, 16).map_err(|_| {
+                    NomlError::parse(
+                        format!("Invalid unicode escape value: {digits}"),
+                        line,
+                        column,
+                    )
+                })?;
+                let c = char::from_u32(code).ok_or_else(|| {
+                    NomlError::parse(
+                        format!("Invalid unicode code point: U+{code:X}"),
+                        line,
+                        column,
+                    )
+                })?;
+                value.push(c);
+                return Ok(());
+            }
+            other => {
+                return Err(NomlError::parse(
+                    format!("Invalid escape sequence: \\{other}"),
+                    line,
+                    column,
+                ));
+            }
+        }
+        self.advance();
+        Ok(())
+    }
 
+    /// Lex a literal (single-quoted) string, single or multi-line.
+    ///
+    /// Literal strings follow TOML: no escapes, the content is taken as written.
+    fn lex_literal_string(&mut self, multiline: bool) -> Result<Token<'a>> {
+        let delim = if multiline { 3 } else { 1 };
+        for _ in 0..delim {
+            self.advance();
+        }
+        if multiline {
+            self.skip_leading_newline();
+        }
+
+        let start = self.pos;
+        let value;
+        loop {
+            if self.is_eof() {
+                return Err(self.unterminated("string literal"));
+            }
+            if self.current_char() == '\'' {
+                if !multiline {
+                    value = self.input[start..self.pos].to_string();
+                    self.advance();
+                    break;
+                }
+                if self.rest().starts_with("'''") {
+                    let run = self
+                        .rest()
+                        .bytes()
+                        .take_while(|b| *b == b'\'')
+                        .count()
+                        .min(5);
+                    let mut v = self.input[start..self.pos].to_string();
+                    for _ in 3..run {
+                        v.push('\'');
+                    }
+                    for _ in 0..run {
+                        self.advance();
+                    }
+                    value = v;
+                    break;
+                }
+            }
+            self.advance();
+        }
+
+        let style = if multiline {
+            StringStyle::TripleSingle
+        } else {
+            StringStyle::Single
+        };
         Ok(self.make_token(TokenKind::String { value, style }))
     }
 
-    /// Lex a raw string literal
+    /// Lex a raw string literal: r"..." or r#"..."#
     fn lex_raw_string(&mut self) -> Result<Token<'a>> {
         self.advance(); // Skip 'r'
 
@@ -553,30 +671,15 @@ impl<'a> Lexer<'a> {
 
         let content_start = self.pos;
 
-        // Find closing sequence: " followed by same number of #
+        // Find the closing sequence: '"' followed by the same number of '#'
         while !self.is_eof() {
             if self.current_char() == '"' {
-                // Check if followed by correct number of hashes
-                let mut hash_count = 0;
-                let mut temp_pos = self.pos + 1;
-
-                while temp_pos < self.input.len()
-                    && self
-                        .input
-                        .chars()
-                        .nth(temp_pos - self.pos + self.char_pos())
-                        == Some('#')
-                {
-                    hash_count += 1;
-                    temp_pos += 1;
-                }
-
-                if hash_count == hashes {
-                    // Found closing sequence - extract content as slice
+                let after = &self.input.as_bytes()[self.pos + 1..];
+                if after.len() >= hashes && after[..hashes].iter().all(|b| *b == b'#') {
                     let value = self.input[content_start..self.pos].to_string();
                     self.advance(); // Skip closing quote
                     for _ in 0..hashes {
-                        self.advance(); // Skip hashes
+                        self.advance();
                     }
                     return Ok(self.make_token(TokenKind::String {
                         value,
@@ -584,136 +687,100 @@ impl<'a> Lexer<'a> {
                     }));
                 }
             }
-
             self.advance();
         }
 
-        // If we reach here, the raw string was not properly closed
-        Err(NomlError::parse(
-            "Unterminated raw string",
-            self.line,
-            self.column,
-        ))
+        Err(self.unterminated("raw string"))
     }
 
     /// Lex a number (integer or float)
     fn lex_number(&mut self) -> Result<Token<'a>> {
         let start_pos = self.pos;
-        let is_negative = self.current_char() == '-';
-
-        if is_negative {
+        let sign = self.current_char();
+        let sign_len = if sign == '-' || sign == '+' {
             self.advance();
-        }
+            1
+        } else {
+            0
+        };
+        let is_negative = sign == '-';
 
-        // Handle different number formats
         let mut is_float = false;
         let mut base = 10;
 
         // Check for hex, octal, or binary prefix
-        if self.current_char() == '0' && !self.is_eof() {
+        if self.current_char() == '0' {
             match self.peek_char() {
-                Some('x') | Some('X') => {
-                    base = 16;
-                    self.advance(); // 0
-                    self.advance(); // x
-                }
-                Some('o') | Some('O') => {
-                    base = 8;
-                    self.advance(); // 0
-                    self.advance(); // o
-                }
-                Some('b') | Some('B') => {
-                    base = 2;
-                    self.advance(); // 0
-                    self.advance(); // b
-                }
+                Some('x') | Some('X') => base = 16,
+                Some('o') | Some('O') => base = 8,
+                Some('b') | Some('B') => base = 2,
                 _ => {}
+            }
+            if base != 10 {
+                self.advance(); // 0
+                self.advance(); // x / o / b
             }
         }
 
         // Read digits
         while !self.is_eof() {
             let ch = self.current_char();
-            let is_valid_digit = match base {
-                2 => ch == '0' || ch == '1',
-                8 => ('0'..='7').contains(&ch),
-                10 => ch.is_ascii_digit() || ch == '.' || ch == 'e' || ch == 'E',
-                16 => ch.is_ascii_hexdigit(),
-                _ => false,
-            };
-
-            if ch == '.' && base == 10 && !is_float {
+            if base == 10 && ch == '.' && !is_float {
+                // Only a dot followed by a digit belongs to the number
+                if !matches!(self.peek_char(), Some('0'..='9')) {
+                    break;
+                }
                 is_float = true;
                 self.advance();
-            } else if (ch == 'e' || ch == 'E') && base == 10 {
+            } else if base == 10 && (ch == 'e' || ch == 'E') {
                 is_float = true;
                 self.advance();
-
-                // Handle optional +/- after e
                 if matches!(self.current_char(), '+' | '-') {
                     self.advance();
                 }
-            } else if is_valid_digit {
-                self.advance();
-            } else if ch == '_' {
-                // Digit separator - skip but don't include in value
+            } else if ch == '_' || ch.is_digit(base) || (base == 10 && ch == '.') {
+                // A second '.' is consumed so the error covers the whole literal
                 self.advance();
             } else {
                 break;
             }
         }
 
-        let end_pos = self.pos;
-        let raw_text = &self.input[start_pos..end_pos];
-        let clean_text = raw_text.replace('_', ""); // Remove digit separators
+        let raw_text = &self.input[start_pos..self.pos];
+        let invalid = |kind: &str| {
+            NomlError::parse(
+                format!("Invalid {kind} literal: {raw_text}"),
+                self.token_start_line,
+                self.token_start_column,
+            )
+        };
+        let clean_text = if raw_text.contains('_') {
+            std::borrow::Cow::Owned(raw_text.replace('_', ""))
+        } else {
+            std::borrow::Cow::Borrowed(raw_text)
+        };
 
         if is_float {
-            let value = clean_text.parse::<f64>().map_err(|_| {
-                NomlError::parse(
-                    format!("Invalid float literal: {raw_text}"),
-                    self.token_start_line,
-                    self.token_start_column,
-                )
-            })?;
-
+            let value = clean_text.parse::<f64>().map_err(|_| invalid("float"))?;
             Ok(self.make_token(TokenKind::Float {
                 value,
                 raw: raw_text,
             }))
         } else {
             let value = if base == 10 {
-                clean_text.parse::<i64>()
+                clean_text.parse::<i64>().map_err(|_| invalid("integer"))?
             } else {
-                // Remove prefix for non-decimal parsing
-                let digits = match base {
-                    16 => &clean_text[if is_negative { 3 } else { 2 }..], // Skip 0x or -0x
-                    8 => &clean_text[if is_negative { 3 } else { 2 }..],  // Skip 0o or -0o
-                    2 => &clean_text[if is_negative { 3 } else { 2 }..],  // Skip 0b or -0b
-                    _ => &clean_text,
-                };
-
-                let mut result = i64::from_str_radix(digits, base).map_err(|_| {
-                    NomlError::parse(
-                        format!("Invalid integer literal: {raw_text}"),
-                        self.token_start_line,
-                        self.token_start_column,
-                    )
-                })?;
-
+                let digits = &clean_text[sign_len + 2..];
+                // Parse the magnitude as u64 so i64::MIN in hex/octal/binary works.
+                let magnitude =
+                    u64::from_str_radix(digits, base).map_err(|_| invalid("integer"))?;
                 if is_negative {
-                    result = -result;
+                    0i64.checked_sub_unsigned(magnitude)
+                        .ok_or_else(|| invalid("integer"))?
+                } else {
+                    i64::try_from(magnitude).map_err(|_| invalid("integer"))?
                 }
-
-                Ok(result)
             };
-
-            let value = value.map_err(|_| {
-                NomlError::parse(
-                    format!("Invalid integer literal: {raw_text}"),
-                    self.token_start_line,
-                    self.token_start_column,
-                )
-            })?;
 
             Ok(self.make_token(TokenKind::Integer {
                 value,
@@ -729,10 +796,10 @@ impl<'a> Lexer<'a> {
         // First character is already validated as alphabetic or underscore
         self.advance();
 
-        // Continue with alphanumeric and underscores
+        // Bare keys may contain letters, digits, '_' and '-' (as in TOML)
         while !self.is_eof() {
             let ch = self.current_char();
-            if ch.is_alphanumeric() || ch == '_' {
+            if ch.is_alphanumeric() || ch == '_' || ch == '-' {
                 self.advance();
             } else {
                 break;
@@ -926,15 +993,113 @@ mod tests {
 
     #[test]
     fn interpolation() {
+        // Inside a string, `${...}` stays part of the string value; the
+        // resolver expands it.
         let input = r#"path = "${base}/logs""#;
         let tokens = tokenize_string(input).unwrap();
-
-        // Should recognize interpolation start token
-        let has_interpolation = tokens
+        assert_eq!(tokens.len(), 4);
+        assert!(
+            matches!(&tokens[2].kind, TokenKind::String { value, .. } if value == "${base}/logs")
+        );
+        assert!(!tokens
             .iter()
-            .any(|t| matches!(t.kind, TokenKind::InterpolationStart));
+            .any(|t| matches!(t.kind, TokenKind::InterpolationStart)));
 
-        assert!(has_interpolation);
+        // A bare `${` outside a string is its own token
+        let tokens = tokenize_string("path = ${base}").unwrap();
+        assert!(matches!(tokens[2].kind, TokenKind::InterpolationStart));
+    }
+
+    fn string_value(input: &str) -> String {
+        let tokens = tokenize_string(input).unwrap();
+        match &tokens[0].kind {
+            TokenKind::String { value, .. } => value.clone(),
+            other => panic!("expected a string token, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn literal_strings_keep_backslashes() {
+        assert_eq!(string_value(r"'C:\Users\noml'"), r"C:\Users\noml");
+        assert_eq!(string_value(r"'${not_expanded}'"), "${not_expanded}");
+    }
+
+    #[test]
+    fn multiline_strings() {
+        assert_eq!(
+            string_value("\"\"\"\nline one\nline two\"\"\""),
+            "line one\nline two"
+        );
+        assert_eq!(string_value("'''\nraw \\n text'''"), "raw \\n text");
+        assert_eq!(
+            string_value("\"\"\"one \\\n      two\"\"\""),
+            "one two",
+            "line-ending backslash trims the newline and indentation"
+        );
+        assert_eq!(string_value("\"\"\"say \"hi\"\"\"\""), "say \"hi\"");
+        assert!(tokenize_string("\"\"\"never closed").is_err());
+    }
+
+    #[test]
+    fn toml_unicode_escapes() {
+        assert_eq!(string_value(r#""\u00E9\U0001F600""#), "\u{e9}\u{1F600}");
+        assert_eq!(string_value(r#""\u{e9}""#), "\u{e9}");
+        assert!(tokenize_string(r#""\u{+41}""#).is_err());
+        assert!(tokenize_string(r#""\u12""#).is_err());
+        assert!(tokenize_string(r#""\uD800""#).is_err());
+    }
+
+    #[test]
+    fn signed_numbers_and_special_floats() {
+        let tokens = tokenize_string("+42 -0x10 +inf -inf nan -0b1").unwrap();
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Integer { value: 42, .. }
+        ));
+        assert!(matches!(
+            tokens[1].kind,
+            TokenKind::Integer { value: -16, .. }
+        ));
+        assert!(matches!(tokens[2].kind, TokenKind::Float { value, .. } if value == f64::INFINITY));
+        assert!(
+            matches!(tokens[3].kind, TokenKind::Float { value, .. } if value == f64::NEG_INFINITY)
+        );
+        // Bare `nan`/`inf` are identifiers here; the parser turns them into floats
+        assert!(matches!(tokens[4].kind, TokenKind::Identifier("nan")));
+        assert!(matches!(
+            tokens[5].kind,
+            TokenKind::Integer { value: -1, .. }
+        ));
+
+        let tokens = tokenize_string("-0x8000000000000000").unwrap();
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Integer {
+                value: i64::MIN,
+                ..
+            }
+        ));
+        assert!(tokenize_string("0x8000000000000000").is_err());
+    }
+
+    #[test]
+    fn dashed_identifiers() {
+        let tokens = tokenize_string("server-name = 1").unwrap();
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Identifier("server-name")
+        ));
+    }
+
+    #[test]
+    fn long_input_lexes_in_linear_time() {
+        // 200k string values; the old lexer re-scanned from the start for
+        // every character and took minutes on input this size.
+        let source = "k = \"value with ünïcode\"\n".repeat(200_000);
+        let started = std::time::Instant::now();
+        let tokens = tokenize_string(&source).unwrap();
+        assert_eq!(tokens.len(), 600_001);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
     }
 
     #[test]

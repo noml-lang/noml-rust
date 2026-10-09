@@ -73,11 +73,11 @@
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-noml = "0.9.0"
+noml = "0.9"
 
 # Optional features
 [dependencies.noml]
-version = "0.9.0"
+version = "0.9"
 features = ["async", "chrono"]
 ```
 
@@ -146,8 +146,8 @@ let config = parse(r#"
     max_connections = 100
 "#)?;
 
-assert_eq!(config.get("app_name")?.as_string()?, "my-service");
-assert_eq!(config.get("database.host")?.as_string()?, "localhost");
+assert_eq!(config.get("app_name").unwrap().as_string()?, "my-service");
+assert_eq!(config.get("database.host").unwrap().as_string()?, "localhost");
 ```
 
 With environment variables and native types:
@@ -164,7 +164,7 @@ let config = parse(r#"
     max_size = @size("10MB")
 "#)?;
 
-assert_eq!(config.get("port")?.as_integer()?, 3000);
+assert_eq!(config.get("port").unwrap().as_integer()?, 3000);
 ```
 
 <h3 id="parse_from_file">parse_from_file()</h3>
@@ -190,7 +190,7 @@ use noml::parse_from_file;
 
 // Parse from file
 let config = parse_from_file("config.noml")?;
-assert_eq!(config.get("app.name")?.as_string()?, "MyApp");
+assert_eq!(config.get("app.name").unwrap().as_string()?, "MyApp");
 
 // Works with Path and PathBuf too
 use std::path::Path;
@@ -257,7 +257,7 @@ use noml::parse_raw;
 let document = parse_raw(r#"
     name = "test"
     port = env("PORT", 8080)
-    include "other.noml"
+    shared = include "other.noml"
 "#)?;
 
 // Document contains unresolved AST nodes
@@ -467,7 +467,7 @@ use noml::parse_async;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = parse_async(r#"
         name = "async-app"
-        include "https://api.example.com/config.noml"
+        remote = include "https://api.example.com/config.noml"
     "#).await?;
     
     Ok(())
@@ -686,10 +686,13 @@ where T: Into<Value>
 - `default: T` - Default value if key not found
 
 **Returns:**
-- `Result<&Value>` - Value reference or default
+- `Result<&Value>` - Value reference, or `NomlError::KeyNotFound` if the key is missing
 
 **Description:**
-Get a value with a fallback default (conceptual - returns the existing value or error).
+Returns the value at `key`. The `default` argument is not used: the method returns a
+reference into the configuration, so it cannot return a value that is not stored there.
+To fall back to a default, use `Config::get_or_insert()` or
+`config.get(key).cloned().unwrap_or(default)`.
 
 **Examples:**
 
@@ -1133,7 +1136,8 @@ pub fn validate(mut self, validate: bool) -> Self
 - `Self` - Builder for chaining
 
 **Description:**
-Enable or disable validation during configuration building.
+Reserved for builder-level validation; it currently has no effect. To check a
+configuration's structure, build it and call `Config::validate_schema()`.
 
 **Examples:**
 
@@ -1244,9 +1248,9 @@ let config = parse(r#"
 "#)?;
 
 // Nested access
-assert_eq!(config.get("server.port")?.as_integer()?, 8080);
-assert_eq!(config.get("server.database.host")?.as_string()?, "localhost");
-assert_eq!(config.get("server.database.credentials.user")?.as_string()?, "admin");
+assert_eq!(config.get("server.port").unwrap().as_integer()?, 8080);
+assert_eq!(config.get("server.database.host").unwrap().as_string()?, "localhost");
+assert_eq!(config.get("server.database.credentials.user").unwrap().as_string()?, "admin");
 ```
 
 <h3 id="value_as_string">Value::as_string()</h3>
@@ -1274,12 +1278,12 @@ let config = parse(r#"
     debug_str = "true"
 "#)?;
 
-assert_eq!(config.get("name")?.as_string()?, "MyApp");
-assert_eq!(config.get("version")?.as_string()?, "1.0.0");
+assert_eq!(config.get("name").unwrap().as_string()?, "MyApp");
+assert_eq!(config.get("version").unwrap().as_string()?, "1.0.0");
 
 // String representations
-assert_eq!(config.get("port_str")?.as_string()?, "8080");
-assert_eq!(config.get("debug_str")?.as_string()?, "true");
+assert_eq!(config.get("port_str").unwrap().as_string()?, "8080");
+assert_eq!(config.get("debug_str").unwrap().as_string()?, "true");
 ```
 
 <h3 id="value_as_integer">Value::as_integer()</h3>
@@ -1293,7 +1297,7 @@ pub fn as_integer(&self) -> Result<i64>
 - `Result<i64>` - Integer value or conversion error
 
 **Description:**
-Convert value to integer. Supports conversion from strings and exact floats.
+Convert value to integer. Supports conversion from strings, booleans, exact floats and `Value::Size`.
 
 **Examples:**
 
@@ -1307,12 +1311,12 @@ let config = parse(r#"
     exact_float = 10.0
 "#)?;
 
-assert_eq!(config.get("port")?.as_integer()?, 8080);
-assert_eq!(config.get("max_connections")?.as_integer()?, 100);
+assert_eq!(config.get("port").unwrap().as_integer()?, 8080);
+assert_eq!(config.get("max_connections").unwrap().as_integer()?, 100);
 
 // Automatic conversions
-assert_eq!(config.get("string_number")?.as_integer()?, 42);
-assert_eq!(config.get("exact_float")?.as_integer()?, 10);
+assert_eq!(config.get("string_number").unwrap().as_integer()?, 42);
+assert_eq!(config.get("exact_float").unwrap().as_integer()?, 10);
 ```
 
 <h3 id="value_as_float">Value::as_float()</h3>
@@ -1326,7 +1330,7 @@ pub fn as_float(&self) -> Result<f64>
 - `Result<f64>` - Float value or conversion error
 
 **Description:**
-Convert value to float. Supports conversion from integers and strings.
+Convert value to float. Supports conversion from integers, strings, `Value::Duration` (seconds) and `Value::Size` (bytes).
 
 **Examples:**
 
@@ -1340,12 +1344,12 @@ let config = parse(r#"
     string_float = "2.5"
 "#)?;
 
-assert_eq!(config.get("pi")?.as_float()?, 3.14159);
-assert_eq!(config.get("temperature")?.as_float()?, 98.6);
+assert_eq!(config.get("pi").unwrap().as_float()?, 3.14159);
+assert_eq!(config.get("temperature").unwrap().as_float()?, 98.6);
 
 // Automatic conversions
-assert_eq!(config.get("integer_as_float")?.as_float()?, 42.0);
-assert_eq!(config.get("string_float")?.as_float()?, 2.5);
+assert_eq!(config.get("integer_as_float").unwrap().as_float()?, 42.0);
+assert_eq!(config.get("string_float").unwrap().as_float()?, 2.5);
 ```
 
 <h3 id="value_as_bool">Value::as_bool()</h3>
@@ -1373,12 +1377,12 @@ let config = parse(r#"
     string_false = "false"
 "#)?;
 
-assert!(config.get("debug")?.as_bool()?);
-assert!(!config.get("production")?.as_bool()?);
+assert!(config.get("debug").unwrap().as_bool()?);
+assert!(!config.get("production").unwrap().as_bool()?);
 
 // String conversions
-assert!(config.get("string_true")?.as_bool()?);
-assert!(!config.get("string_false")?.as_bool()?);
+assert!(config.get("string_true").unwrap().as_bool()?);
+assert!(!config.get("string_false").unwrap().as_bool()?);
 ```
 
 <h3 id="value_as_array">Value::as_array()</h3>
@@ -1405,14 +1409,14 @@ let config = parse(r#"
     mixed = [1, "two", true, null]
 "#)?;
 
-let features = config.get("features")?.as_array()?;
+let features = config.get("features").unwrap().as_array()?;
 assert_eq!(features.len(), 3);
 assert_eq!(features[0].as_string()?, "auth");
 
-let ports = config.get("ports")?.as_array()?;
+let ports = config.get("ports").unwrap().as_array()?;
 assert_eq!(ports[1].as_integer()?, 8081);
 
-let mixed = config.get("mixed")?.as_array()?;
+let mixed = config.get("mixed").unwrap().as_array()?;
 assert_eq!(mixed[0].as_integer()?, 1);
 assert_eq!(mixed[1].as_string()?, "two");
 assert!(mixed[2].as_bool()?);
@@ -1444,11 +1448,11 @@ let config = parse(r#"
     inline_table = { x = 10, y = 20 }
 "#)?;
 
-let db_table = config.get("database")?.as_table()?;
+let db_table = config.get("database").unwrap().as_table()?;
 assert_eq!(db_table.get("host").unwrap().as_string().unwrap(), "localhost");
 assert_eq!(db_table.get("port").unwrap().as_integer().unwrap(), 5432);
 
-let inline = config.get("inline_table")?.as_table()?;
+let inline = config.get("inline_table").unwrap().as_table()?;
 assert_eq!(inline.get("x").unwrap().as_integer().unwrap(), 10);
 ```
 
@@ -1707,8 +1711,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_connections = 10
     "#)?;
     
-    println!("App: {}", config.get("app_name")?.as_string()?);
-    println!("Port: {}", config.get("port")?.as_integer()?);
+    println!("App: {}", config.get("app_name").unwrap().as_string()?);
+    println!("Port: {}", config.get("port").unwrap().as_integer()?);
     
     // Method 2: Configuration management
     let mut managed_config = Config::from_string(r#"
