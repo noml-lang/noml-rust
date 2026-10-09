@@ -86,6 +86,7 @@ use crate::error::{NomlError, Result};
 use crate::parser::{parse, parse_from_file, Document};
 use crate::schema::Schema;
 use crate::value::Value;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -150,8 +151,10 @@ pub struct ConfigBuilder {
     allow_missing: bool,
     /// Default values to use if keys are missing
     defaults: BTreeMap<String, Value>,
-    /// Whether to validate the configuration
-    validate: bool,
+    /// Schema to apply defaults from and validate against
+    schema: Option<Schema>,
+    /// Whether to validate against the schema (`None` means yes)
+    validate: Option<bool>,
 }
 
 impl Config {
@@ -231,13 +234,12 @@ impl Config {
         self.values.get(key)
     }
 
-    /// Get a value by key path, or an error if it is missing.
+    /// Get a value by key path, falling back to `default` when the key is
+    /// missing.
     ///
-    /// The `default` argument is not used: this method returns a reference
-    /// into the configuration, so it cannot hand back a value that is not
-    /// stored there. Returns [`NomlError::KeyNotFound`] when the key is
-    /// missing. To fall back to a default, use [`Config::get_or_insert`], or
-    /// `config.get(key).cloned().unwrap_or(default)`.
+    /// Returns the stored value borrowed, or `default` owned, so it never
+    /// fails and never changes the configuration. Use
+    /// [`Config::get_or_insert`] to store the default as well.
     ///
     /// # Example
     /// ```rust
@@ -247,11 +249,36 @@ impl Config {
     /// port = 8080
     /// "#)?;
     ///
-    /// // Key exists
-    /// let port = config.get_or("server.port", 3000)?;
-    /// assert_eq!(port.as_integer().unwrap(), 8080);
+    /// // Key exists: the stored value
+    /// assert_eq!(config.get_with_default("server.port", 3000).as_integer()?, 8080);
+    ///
+    /// // Key missing: the default
+    /// assert_eq!(config.get_with_default("server.workers", 4).as_integer()?, 4);
     /// # Ok::<(), noml::NomlError>(())
     /// ```
+    pub fn get_with_default<T>(&self, key: &str, default: T) -> Cow<'_, Value>
+    where
+        T: Into<Value>,
+    {
+        match self.get(key) {
+            Some(value) => Cow::Borrowed(value),
+            None => Cow::Owned(default.into()),
+        }
+    }
+
+    /// Get a value by key path, or an error if it is missing.
+    ///
+    /// Despite the name, the `default` argument is never used: this method
+    /// returns a reference into the configuration, so it cannot hand back a
+    /// value that is not stored there. It returns
+    /// [`NomlError::KeyNotFound`] when the key is missing.
+    ///
+    /// Use [`Config::get_with_default`] to get the default back, or
+    /// [`Config::get_or_insert`] to store it.
+    #[deprecated(
+        since = "0.9.3",
+        note = "the default is never returned; use `get_with_default` (or `get_or_insert`)"
+    )]
     pub fn get_or<T>(&self, key: &str, _default: T) -> Result<&Value>
     where
         T: Into<Value>,
@@ -679,20 +706,73 @@ impl ConfigBuilder {
         self
     }
 
-    /// Reserved for builder-level validation; currently has no effect.
+    /// Check the built configuration against a [`Schema`].
     ///
-    /// To check a configuration's structure, build it and call
-    /// [`Config::validate_schema`] with a [`Schema`].
-    pub fn validate(mut self, validate: bool) -> Self {
-        self.validate = validate;
+    /// When the configuration is built, the schema's field defaults are
+    /// filled in for missing keys (after this builder's own
+    /// [`default_value`](Self::default_value)s), and the result is validated
+    /// against the schema unless [`validate(false)`](Self::validate) was set.
+    /// A failed check makes `build_from_file` / `build_from_string` return
+    /// the validation error.
+    ///
+    /// # Example
+    /// ```rust
+    /// use noml::{Config, FieldType, Schema, Value};
+    ///
+    /// let schema = Schema::new()
+    ///     .required_field("name", FieldType::String)
+    ///     .field_with_default("port", FieldType::Integer, Value::Integer(8080));
+    ///
+    /// let config = Config::builder()
+    ///     .schema(schema.clone())
+    ///     .build_from_string(r#"name = "api""#)?;
+    /// assert_eq!(config.get("port").unwrap().as_integer()?, 8080);
+    ///
+    /// // A missing required field is an error
+    /// assert!(Config::builder().schema(schema).build_from_string("port = 1").is_err());
+    /// # Ok::<(), noml::NomlError>(())
+    /// ```
+    pub fn schema(mut self, schema: Schema) -> Self {
+        self.schema = Some(schema);
         self
+    }
+
+    /// Turn schema validation on or off.
+    ///
+    /// Validation runs against the schema given with
+    /// [`schema`](Self::schema) and is on by default whenever a schema is
+    /// set. `validate(false)` keeps the schema's defaults but skips the
+    /// check. Without a schema there is nothing to validate against, so this
+    /// setting has no effect.
+    pub fn validate(mut self, validate: bool) -> Self {
+        self.validate = Some(validate);
+        self
+    }
+
+    /// Apply defaults and the schema, then mark the result as unmodified
+    fn finish(self, mut config: Config) -> Result<Config> {
+        for (key, value) in self.defaults {
+            if !config.contains_key(&key) {
+                config.set(&key, value)?;
+            }
+        }
+
+        if let Some(schema) = &self.schema {
+            schema.apply_defaults(&mut config.values);
+            if self.validate != Some(false) {
+                schema.validate(&config.values)?;
+            }
+        }
+
+        config.mark_clean(); // Defaults are not modifications
+        Ok(config)
     }
 
     /// Build the configuration from a file
     pub fn build_from_file<P: AsRef<Path>>(self, path: P) -> Result<Config> {
         let path = path.as_ref();
 
-        let mut config = if path.exists() {
+        let config = if path.exists() {
             Config::from_file(path)?
         } else if self.allow_missing {
             Config::new()
@@ -703,30 +783,13 @@ impl ConfigBuilder {
             ));
         };
 
-        // Apply defaults for missing keys
-        for (key, value) in self.defaults {
-            if !config.contains_key(&key) {
-                config.set(&key, value)?;
-            }
-        }
-
-        config.mark_clean(); // Don't consider defaults as modifications
-        Ok(config)
+        self.finish(config)
     }
 
     /// Build the configuration from a string
     pub fn build_from_string(self, content: &str) -> Result<Config> {
-        let mut config = Config::from_string(content)?;
-
-        // Apply defaults for missing keys
-        for (key, value) in self.defaults {
-            if !config.contains_key(&key) {
-                config.set(&key, value)?;
-            }
-        }
-
-        config.mark_clean();
-        Ok(config)
+        let config = Config::from_string(content)?;
+        self.finish(config)
     }
 }
 
@@ -1091,6 +1154,70 @@ mod tests {
         assert_eq!(config.get("version").unwrap().as_string().unwrap(), "1.0");
 
         assert!(!config.is_modified()); // Defaults don't count as modifications
+    }
+
+    #[test]
+    fn builder_applies_schema_defaults_and_validates() {
+        use crate::schema::FieldType;
+        let schema = Schema::new()
+            .required_field("name", FieldType::String)
+            .field_with_default("port", FieldType::Integer, Value::Integer(8080));
+
+        let config = Config::builder()
+            .schema(schema.clone())
+            .build_from_string("name = \"api\"")
+            .unwrap();
+        assert_eq!(config.get("port"), Some(&Value::Integer(8080)));
+        assert!(!config.is_modified());
+
+        // Missing required field and wrong type are errors
+        assert!(Config::builder()
+            .schema(schema.clone())
+            .build_from_string("port = 1")
+            .is_err());
+        assert!(Config::builder()
+            .schema(schema.clone())
+            .build_from_string("name = 1")
+            .is_err());
+
+        // validate(false) keeps the defaults but skips the check
+        let config = Config::builder()
+            .schema(schema.clone())
+            .validate(false)
+            .build_from_string("other = true")
+            .unwrap();
+        assert_eq!(config.get("port"), Some(&Value::Integer(8080)));
+
+        // Builder defaults are applied before the schema check
+        let config = Config::builder()
+            .schema(schema)
+            .default_value("name", "fallback")
+            .validate(true)
+            .build_from_string("")
+            .unwrap();
+        assert_eq!(config.get("name").unwrap().as_string().unwrap(), "fallback");
+    }
+
+    #[test]
+    fn get_with_default_returns_the_default() {
+        let config = Config::from_string("port = 8080").unwrap();
+        assert_eq!(
+            config.get_with_default("port", 1).as_integer().unwrap(),
+            8080
+        );
+        assert!(matches!(
+            config.get_with_default("port", 1),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert_eq!(
+            config.get_with_default("missing", 7).as_integer().unwrap(),
+            7
+        );
+        assert!(config.get("missing").is_none(), "nothing is stored");
+
+        #[allow(deprecated)]
+        let old = config.get_or("missing", 7);
+        assert!(old.is_err());
     }
 
     #[test]

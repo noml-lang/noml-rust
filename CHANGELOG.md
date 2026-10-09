@@ -6,6 +6,20 @@
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-09
+
+### Added
+- **`ConfigBuilder::schema(Schema)`**: the builder can now check what it builds. Builder defaults are applied first, then the schema's field defaults fill in missing keys, then the result is validated. A failed check is returned from `build_from_file` / `build_from_string`.
+- **`Config::get_with_default(key, default) -> Cow<Value>`**: returns the stored value, or the default when the key is missing, without changing the configuration.
+- **`Schema::apply_defaults(&mut Value)`**: fills in the defaults declared with `field_with_default`, including in nested table schemas. The schema docs promised this, but nothing applied the defaults before.
+
+### Fixed
+- **`ConfigBuilder::validate` did nothing.** It now turns schema validation on or off (on by default when a schema is set; `validate(false)` keeps the schema's defaults but skips the check).
+- **Schema errors named only the innermost key.** A bad `port` inside `[server]` is now reported as `server.port`, with the path also set in the error's `path` field. Fields are checked in name order, so the same input always gives the same first error.
+
+### Deprecated
+- **`Config::get_or`**: its `default` argument was never returned (it returns a reference into the config, so it cannot hand back a value that is not stored there) and it errors on a missing key. Use `get_with_default`, or `get_or_insert` to store the default.
+
 ## [0.9.2] - 2026-10-09
 
 ### Fixed
@@ -240,7 +254,8 @@
 
 <!-- FOOTER
 ###################################################-->
-[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.9.2...HEAD
+[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/noml-lang/noml-rust/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/noml-lang/noml-rust/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/noml-lang/noml-rust/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/noml-lang/noml-rust/compare/v0.8.0...v0.9.0

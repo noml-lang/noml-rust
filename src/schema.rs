@@ -173,35 +173,79 @@ impl Schema {
         self
     }
 
-    /// Validate a value against this schema
+    /// Validate a value against this schema.
+    ///
+    /// Errors name the full path of the offending field, such as
+    /// `server.port` or `hosts[2]`. Fields are checked in name order, so the
+    /// same input always reports the same first error.
     pub fn validate(&self, value: &Value) -> Result<()> {
+        self.validate_at(value, "")
+    }
+
+    /// Fill in the defaults of fields declared with
+    /// [`field_with_default`](Self::field_with_default) that are missing from
+    /// `value`, including inside nested table schemas. Values that are
+    /// present are never changed, and a non-table `value` is left alone.
+    pub fn apply_defaults(&self, value: &mut Value) {
+        let Value::Table(table) = value else {
+            return;
+        };
+        for (name, field) in &self.fields {
+            if !table.contains_key(name) {
+                if let Some(default) = &field.default {
+                    table.insert(name.clone(), default.clone());
+                }
+            }
+            if let (Some(child), FieldType::Table(nested)) =
+                (table.get_mut(name), &field.field_type)
+            {
+                nested.apply_defaults(child);
+            }
+        }
+    }
+
+    fn validate_at(&self, value: &Value, prefix: &str) -> Result<()> {
+        let path = |name: &str| {
+            if prefix.is_empty() {
+                name.to_string()
+            } else {
+                format!("{prefix}.{name}")
+            }
+        };
         match value {
             Value::Table(table) => {
+                let mut names: Vec<&String> = self.fields.keys().collect();
+                names.sort();
+
                 // Check required fields
-                for (field_name, field_schema) in &self.fields {
-                    if field_schema.required && !table.contains_key(field_name) {
-                        return Err(NomlError::validation(format!(
-                            "Required field '{field_name}' is missing"
-                        )));
+                for name in &names {
+                    if self.fields[*name].required && !table.contains_key(*name) {
+                        return Err(NomlError::validation_at(
+                            format!("Required field '{}' is missing", path(name)),
+                            path(name),
+                        ));
                     }
                 }
 
-                // Validate existing fields
+                // Validate existing fields (BTreeMap iterates in name order)
                 for (key, val) in table {
                     if let Some(field_schema) = self.fields.get(key) {
-                        self.validate_field_type(val, &field_schema.field_type, key)?;
+                        self.validate_field_type(val, &field_schema.field_type, &path(key))?;
                     } else if !self.allow_additional {
-                        return Err(NomlError::validation(format!(
-                            "Additional field '{key}' is not allowed"
-                        )));
+                        return Err(NomlError::validation_at(
+                            format!("Additional field '{}' is not allowed", path(key)),
+                            path(key),
+                        ));
                     }
                 }
 
                 Ok(())
             }
-            _ => Err(NomlError::validation(
-                "Schema validation requires a table/object at the root".to_string(),
-            )),
+            _ => Err(NomlError::validation(if prefix.is_empty() {
+                "Schema validation requires a table/object at the root".to_string()
+            } else {
+                format!("Field '{prefix}' must be a table")
+            })),
         }
     }
 
@@ -230,7 +274,9 @@ impl Schema {
                 Ok(())
             }
 
-            (Value::Table(_), FieldType::Table(nested_schema)) => nested_schema.validate(value),
+            (Value::Table(_), FieldType::Table(nested_schema)) => {
+                nested_schema.validate_at(value, field_path)
+            }
 
             (val, FieldType::Union(types)) => {
                 for field_type in types {
@@ -241,15 +287,19 @@ impl Schema {
                         return Ok(());
                     }
                 }
-                Err(NomlError::validation(format!(
-                    "Field '{field_path}' does not match any of the expected types"
-                )))
+                Err(NomlError::validation_at(
+                    format!("Field '{field_path}' does not match any of the expected types"),
+                    field_path,
+                ))
             }
 
-            _ => Err(NomlError::validation(format!(
-                "Field '{field_path}' has incorrect type. Expected {expected_type:?}, got {:?}",
-                self.value_type_name(value)
-            ))),
+            _ => Err(NomlError::validation_at(
+                format!(
+                    "Field '{field_path}' has incorrect type. Expected {expected_type:?}, got {:?}",
+                    self.value_type_name(value)
+                ),
+                field_path,
+            )),
         }
     }
 
@@ -397,5 +447,40 @@ mod tests {
 
         let invalid_value = Value::Table(invalid_config);
         assert!(schema.validate(&invalid_value).is_err());
+    }
+
+    #[test]
+    fn nested_errors_name_the_full_path() {
+        let schema = Schema::new().required_field(
+            "server",
+            FieldType::Table(Schema::new().required_field("port", FieldType::Integer)),
+        );
+        let mut server = std::collections::BTreeMap::new();
+        server.insert("port".to_string(), Value::String("x".to_string()));
+        let mut root = std::collections::BTreeMap::new();
+        root.insert("server".to_string(), Value::Table(server));
+        let error = schema.validate(&Value::Table(root)).unwrap_err();
+        assert!(error.to_string().contains("server.port"), "{error}");
+    }
+
+    #[test]
+    fn defaults_are_applied_without_overwriting() {
+        let schema = Schema::new()
+            .field_with_default("port", FieldType::Integer, Value::Integer(80))
+            .field_with_default("host", FieldType::String, Value::String("h".into()))
+            .optional_field(
+                "db",
+                FieldType::Table(Schema::new().field_with_default(
+                    "pool",
+                    FieldType::Integer,
+                    Value::Integer(5),
+                )),
+            );
+        let mut value = crate::parse("port = 8080\n[db]\nname = \"x\"").unwrap();
+        schema.apply_defaults(&mut value);
+        assert_eq!(value.get("port"), Some(&Value::Integer(8080)));
+        assert_eq!(value.get("host"), Some(&Value::String("h".into())));
+        assert_eq!(value.get("db.pool"), Some(&Value::Integer(5)));
+        assert!(schema.validate(&value).is_ok());
     }
 }

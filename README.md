@@ -305,7 +305,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 ---
 
 <div align="center">
-    <strong>NOML 0.9.2 - High-Performance Dynamic Configuration</strong><br>
+    <strong>NOML 0.9.3 - High-Performance Dynamic Configuration</strong><br>
     <em>Blazing-fast • Feature-rich • Format-preserving</em>
 </div>
 

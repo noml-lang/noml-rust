@@ -31,7 +31,8 @@
   - **[Config::from_file()](#config_from_file)**
   - **[Config::builder()](#config_builder)**
   - **[Config::get()](#config_get)**
-  - **[Config::get_or()](#config_get_or)**
+  - **[Config::get_with_default()](#config_get_with_default)**
+  - **[Config::get_or()](#config_get_or)** (deprecated)
   - **[Config::get_or_insert()](#config_get_or_insert)**
   - **[Config::set()](#config_set)**
   - **[Config::remove()](#config_remove)**
@@ -46,6 +47,7 @@
 - **[Configuration Builder](#configuration-builder)**
   - **[ConfigBuilder::default_value()](#configbuilder_default_value)**
   - **[ConfigBuilder::allow_missing()](#configbuilder_allow_missing)**
+  - **[ConfigBuilder::schema()](#configbuilder_schema)**
   - **[ConfigBuilder::validate()](#configbuilder_validate)**
   - **[ConfigBuilder::build_from_file()](#configbuilder_build_from_file)**
   - **[ConfigBuilder::build_from_string()](#configbuilder_build_from_string)**
@@ -673,26 +675,24 @@ let port = config.get("database.port").unwrap();
 assert_eq!(port.as_integer().unwrap(), 5432);
 ```
 
-<h3 id="config_get_or">Config::get_or()</h3>
+<h3 id="config_get_with_default">Config::get_with_default()</h3>
 
 **Function Signature:**
 ```rust
-pub fn get_or<T>(&self, key: &str, default: T) -> Result<&Value>
+pub fn get_with_default<T>(&self, key: &str, default: T) -> Cow<'_, Value>
 where T: Into<Value>
 ```
 
 **Parameters:**
 - `key: &str` - Key path to get
-- `default: T` - Default value if key not found
+- `default: T` - Value to return if the key is missing
 
 **Returns:**
-- `Result<&Value>` - Value reference, or `NomlError::KeyNotFound` if the key is missing
+- `Cow<'_, Value>` - The stored value (borrowed), or `default` (owned)
 
 **Description:**
-Returns the value at `key`. The `default` argument is not used: the method returns a
-reference into the configuration, so it cannot return a value that is not stored there.
-To fall back to a default, use `Config::get_or_insert()` or
-`config.get(key).cloned().unwrap_or(default)`.
+Reads a value with a fallback. Never fails and never changes the configuration; use
+`Config::get_or_insert()` to store the default as well. Added in 0.9.3.
 
 **Examples:**
 
@@ -704,9 +704,20 @@ let config = Config::from_string(r#"
     port = 8080
 "#)?;
 
-// Key exists
-let port = config.get_or("server.port", 3000)?;
-assert_eq!(port.as_integer().unwrap(), 8080);
+assert_eq!(config.get_with_default("server.port", 3000).as_integer()?, 8080);
+assert_eq!(config.get_with_default("server.workers", 4).as_integer()?, 4);
+```
+
+<h3 id="config_get_or">Config::get_or()</h3>
+
+**Deprecated since 0.9.3.** The `default` argument was never returned: the method returns
+a reference into the configuration, so it cannot hand back a value that is not stored there,
+and it returns `NomlError::KeyNotFound` for a missing key. Use `Config::get_with_default()`
+(or `Config::get_or_insert()`) instead.
+
+```rust
+pub fn get_or<T>(&self, key: &str, default: T) -> Result<&Value>
+where T: Into<Value>
 ```
 
 <h3 id="config_get_or_insert">Config::get_or_insert()</h3>
@@ -1122,6 +1133,36 @@ let config = Config::builder()
 assert_eq!(config.get("name").unwrap().as_string().unwrap(), "DefaultApp");
 ```
 
+<h3 id="configbuilder_schema">ConfigBuilder::schema()</h3>
+
+**Function Signature:**
+```rust
+pub fn schema(mut self, schema: Schema) -> Self
+```
+
+**Description:**
+Checks the built configuration against `schema`. When the configuration is built, the
+builder's own defaults are applied first, then the schema's field defaults
+(`Schema::field_with_default`) fill in missing keys, and finally the result is validated
+unless `validate(false)` was set. A failed check makes `build_from_file` /
+`build_from_string` return the validation error. Added in 0.9.3.
+
+**Examples:**
+
+```rust
+use noml::{Config, FieldType, Schema, Value};
+
+let schema = Schema::new()
+    .required_field("name", FieldType::String)
+    .field_with_default("port", FieldType::Integer, Value::Integer(8080));
+
+let config = Config::builder()
+    .schema(schema)
+    .build_from_string(r#"name = "api""#)?;
+
+assert_eq!(config.get("port").unwrap().as_integer()?, 8080);
+```
+
 <h3 id="configbuilder_validate">ConfigBuilder::validate()</h3>
 
 **Function Signature:**
@@ -1130,23 +1171,31 @@ pub fn validate(mut self, validate: bool) -> Self
 ```
 
 **Parameters:**
-- `validate: bool` - Whether to enable validation
+- `validate: bool` - Whether to validate against the schema set with `schema()`
 
 **Returns:**
 - `Self` - Builder for chaining
 
 **Description:**
-Reserved for builder-level validation; it currently has no effect. To check a
-configuration's structure, build it and call `Config::validate_schema()`.
+Turns schema validation on or off. Validation is on by default whenever a schema is set;
+`validate(false)` keeps the schema's defaults but skips the check. Without a schema there is
+nothing to validate against, so the setting has no effect.
 
 **Examples:**
 
 ```rust
-use noml::Config;
+use noml::{Config, FieldType, Schema};
 
+let schema = Schema::new().required_field("name", FieldType::String);
+
+// Fails: `name` is required
+assert!(Config::builder().schema(schema.clone()).build_from_string("x = 1").is_err());
+
+// Passes: validation turned off
 let config = Config::builder()
-    .validate(true)
-    .build_from_string("name = 'ValidApp'")?;
+    .schema(schema)
+    .validate(false)
+    .build_from_string("x = 1")?;
 ```
 
 <h3 id="configbuilder_build_from_file">ConfigBuilder::build_from_file()</h3>
