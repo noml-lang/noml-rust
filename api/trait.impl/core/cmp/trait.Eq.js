@@ -1,9 +1,9 @@
 (function() {
-    const implementors = Object.fromEntries([["noml",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"noml/parser/ast/struct.Key.html\" title=\"struct noml::parser::ast::Key\">Key</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"noml/parser/ast/struct.Span.html\" title=\"struct noml::parser::ast::Span\">Span</a>",0]]]]);
+    const implementors = Object.fromEntries([["noml",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"noml/datetime/struct.Date.html\" title=\"struct noml::datetime::Date\">Date</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"noml/datetime/struct.Datetime.html\" title=\"struct noml::datetime::Datetime\">Datetime</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"noml/parser/ast/struct.Key.html\" title=\"struct noml::parser::ast::Key\">Key</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"enum\" href=\"noml/datetime/enum.Offset.html\" title=\"enum noml::datetime::Offset\">Offset</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"noml/parser/ast/struct.Span.html\" title=\"struct noml::parser::ast::Span\">Span</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.99.0/core/cmp/trait.Eq.html\" title=\"trait core::cmp::Eq\">Eq</a> for <a class=\"struct\" href=\"noml/datetime/struct.Time.html\" title=\"struct noml::datetime::Time\">Time</a>",0]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
         window.pending_implementors = implementors;
     }
 })()
-//{"start":59,"fragment_lengths":[503]}
+//{"start":59,"fragment_lengths":[1487]}
