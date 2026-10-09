@@ -4,6 +4,7 @@
 //! This includes comments, formatting, and source location information for
 //! perfect round-trip serialization and error reporting.
 
+use crate::datetime::Datetime;
 use crate::error::Result;
 use crate::value::Value;
 use std::fmt;
@@ -111,6 +112,7 @@ impl Default for Indentation {
 
 /// Line ending style
 #[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
 pub enum LineEnding {
     /// Unix-style (LF)
     #[default]
@@ -123,6 +125,7 @@ pub enum LineEnding {
 
 /// Format-specific styling information
 #[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
 pub enum FormatStyle {
     /// Default formatting
     #[default]
@@ -194,6 +197,7 @@ pub struct Comment {
 
 /// Different comment styles
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum CommentStyle {
     /// Line comment starting with #
     Line,
@@ -202,7 +206,10 @@ pub enum CommentStyle {
 }
 
 /// AST value types - like Value but with source preservation
+///
+/// The enum is `#[non_exhaustive]`: match it with a `_` arm.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum AstValue {
     /// Null value
     Null,
@@ -223,6 +230,14 @@ pub enum AstValue {
         /// The float value
         value: f64,
         /// Original text (for preserving precision and format)
+        raw: String,
+    },
+
+    /// Date and/or time literal such as `1979-05-27T07:32:00Z`
+    DateTime {
+        /// The parsed value
+        value: Datetime,
+        /// Original text, kept for round-trip serialization
         raw: String,
     },
 
@@ -316,6 +331,7 @@ pub struct KeySegment {
 
 /// String quoting styles
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum StringStyle {
     /// Double quotes "string"
     Double,

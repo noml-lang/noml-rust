@@ -247,6 +247,16 @@ impl<'a> NomlParser<'a> {
                 quoted: false,
                 quote_style: None,
             }),
+            // A bare key such as `2024-01-01` lexes as a date
+            TokenKind::DateTime { raw, .. }
+                if raw.bytes().all(|b| b.is_ascii_digit() || b == b'-') =>
+            {
+                Ok(KeySegment {
+                    name: token.text.to_string(),
+                    quoted: false,
+                    quote_style: None,
+                })
+            }
             _ => Err(NomlError::unexpected_token(
                 format!("{}", token.kind),
                 "identifier or string",
@@ -284,6 +294,19 @@ impl<'a> NomlParser<'a> {
             TokenKind::Integer { .. } => self.parse_integer_value(),
             TokenKind::Float { .. } => self.parse_float_value(),
             TokenKind::Bool(_) => self.parse_bool_value(),
+            TokenKind::DateTime { .. } => {
+                let token = self.advance()?;
+                match token.kind {
+                    TokenKind::DateTime { value, raw } => Ok(AstNode::new(
+                        AstValue::DateTime {
+                            value,
+                            raw: raw.to_string(),
+                        },
+                        token.span,
+                    )),
+                    _ => unreachable!("checked by the outer match"),
+                }
+            }
             TokenKind::Null => self.parse_null_value(),
 
             // Collections
@@ -629,8 +652,15 @@ impl<'a> NomlParser<'a> {
                     path.push_str(raw)
                 }
                 TokenKind::String { value, .. } => {
+                    // Quoted segment; `\` and `"` are escaped so the path
+                    // reads back the same way
                     path.push('"');
-                    path.push_str(value);
+                    for c in value.chars() {
+                        if c == '"' || c == '\\' {
+                            path.push('\\');
+                        }
+                        path.push(c);
+                    }
                     path.push('"');
                 }
                 _ => {

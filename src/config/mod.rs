@@ -266,29 +266,6 @@ impl Config {
         }
     }
 
-    /// Get a value by key path, or an error if it is missing.
-    ///
-    /// Despite the name, the `default` argument is never used: this method
-    /// returns a reference into the configuration, so it cannot hand back a
-    /// value that is not stored there. It returns
-    /// [`NomlError::KeyNotFound`] when the key is missing.
-    ///
-    /// Use [`Config::get_with_default`] to get the default back, or
-    /// [`Config::get_or_insert`] to store it.
-    #[deprecated(
-        since = "0.9.3",
-        note = "the default is never returned; use `get_with_default` (or `get_or_insert`)"
-    )]
-    pub fn get_or<T>(&self, key: &str, _default: T) -> Result<&Value>
-    where
-        T: Into<Value>,
-    {
-        match self.get(key) {
-            Some(value) => Ok(value),
-            None => Err(NomlError::key_not_found(key)),
-        }
-    }
-
     /// Get a value, inserting `default` first if the key doesn't exist
     pub fn get_or_insert<T>(&mut self, key: &str, default: T) -> Result<&Value>
     where
@@ -940,8 +917,9 @@ fn write_literal(out: &mut String, value: &Value) -> Result<()> {
             }
             out.push(']');
         }
-        #[cfg(feature = "chrono")]
-        Value::DateTime(dt) => write_string(out, &dt.to_rfc3339(), true),
+        Value::DateTime(dt) => {
+            let _ = write!(out, "{dt}");
+        }
     }
     Ok(())
 }
@@ -1214,10 +1192,6 @@ mod tests {
             7
         );
         assert!(config.get("missing").is_none(), "nothing is stored");
-
-        #[allow(deprecated)]
-        let old = config.get_or("missing", 7);
-        assert!(old.is_err());
     }
 
     #[test]

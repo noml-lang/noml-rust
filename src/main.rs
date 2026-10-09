@@ -129,10 +129,8 @@ fn display_value(value: &noml::Value, indent: usize) {
             }
             println!("{indent_str}}}");
         }
-        #[cfg(feature = "chrono")]
-        noml::Value::DateTime(dt) => {
-            println!("{}{}", indent_str, dt.format("%Y-%m-%d %H:%M:%S UTC"))
-        }
+        noml::Value::DateTime(dt) => println!("{indent_str}{dt}"),
+        other => println!("{indent_str}{other}"),
     }
 }
 

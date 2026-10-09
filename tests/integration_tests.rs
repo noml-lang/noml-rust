@@ -766,17 +766,11 @@ fn test_custom_resolver_config() {
     let mut env_vars = HashMap::new();
     env_vars.insert("CUSTOM_VAR".to_string(), "custom_value".to_string());
 
-    let config = ResolverConfig {
-        base_path: None,
-        env_vars: Some(env_vars),
-        max_include_depth: 5,
-        allow_missing_env: true,
-        native_resolvers: HashMap::new(),
-        #[cfg(feature = "async")]
-        http_timeout: std::time::Duration::from_secs(30),
-        #[cfg(feature = "async")]
-        http_cache: Some(HashMap::new()),
-    };
+    let mut config = ResolverConfig::default();
+    config.env_vars = Some(env_vars);
+    config.max_include_depth = 5;
+    config.allow_missing_env = true;
+    config.native_resolvers = HashMap::new();
 
     let mut resolver = Resolver::with_config(config);
 

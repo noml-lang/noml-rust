@@ -32,7 +32,6 @@
   - **[Config::builder()](#config_builder)**
   - **[Config::get()](#config_get)**
   - **[Config::get_with_default()](#config_get_with_default)**
-  - **[Config::get_or()](#config_get_or)** (deprecated)
   - **[Config::get_or_insert()](#config_get_or_insert)**
   - **[Config::set()](#config_set)**
   - **[Config::remove()](#config_remove)**
@@ -75,11 +74,11 @@
 Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
-noml = "0.9"
+noml = "0.10"
 
 # Optional features
 [dependencies.noml]
-version = "0.9"
+version = "0.10"
 features = ["async", "chrono"]
 ```
 
@@ -106,7 +105,7 @@ cargo add noml --features async,chrono
 | Feature               | Default | Description |
 |----------------------|:-------:|-------------|
 | `async`              |  ❌     | Enables async functions for file operations and HTTP includes |
-| `chrono`             |  ❌     | Enables DateTime support with chrono integration |
+| `chrono`             |  ❌     | Conversions between `noml::Datetime` and `chrono` date-times |
 
 <br>
 <hr>
@@ -706,18 +705,6 @@ let config = Config::from_string(r#"
 
 assert_eq!(config.get_with_default("server.port", 3000).as_integer()?, 8080);
 assert_eq!(config.get_with_default("server.workers", 4).as_integer()?, 4);
-```
-
-<h3 id="config_get_or">Config::get_or()</h3>
-
-**Deprecated since 0.9.3.** The `default` argument was never returned: the method returns
-a reference into the configuration, so it cannot hand back a value that is not stored there,
-and it returns `NomlError::KeyNotFound` for a missing key. Use `Config::get_with_default()`
-(or `Config::get_or_insert()`) instead.
-
-```rust
-pub fn get_or<T>(&self, key: &str, default: T) -> Result<&Value>
-where T: Into<Value>
 ```
 
 <h3 id="config_get_or_insert">Config::get_or_insert()</h3>

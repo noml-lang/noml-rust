@@ -14,7 +14,10 @@ pub type Result<T> = std::result::Result<T, NomlError>;
 /// This error system is designed to provide maximum clarity about what went wrong,
 /// where it happened, and how to fix it. Each variant includes enough context
 /// for both developers and end users to understand and resolve issues.
+///
+/// The enum is `#[non_exhaustive]`: match it with a `_` arm.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum NomlError {
     #[error("Parse error at line {line}, column {column}: {message}")]
     /// Parsing errors - when the input cannot be parsed due to syntax issues.

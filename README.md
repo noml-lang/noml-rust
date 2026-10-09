@@ -60,7 +60,7 @@ Add NOML to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-noml = "0.9"
+noml = "0.10"
 ```
 
 ### **Basic Usage**
@@ -236,10 +236,10 @@ noml version
 ### **Cargo Features**
 ```toml
 [dependencies]
-noml = { version = "0.9", features = ["chrono", "async"] }
+noml = { version = "0.10", features = ["chrono", "async"] }
 ```
 
-- **`chrono`** - DateTime support with timezone handling
+- **`chrono`** - Conversions between `noml::Datetime` and `chrono` date-times
 - **`async`** - Async file operations and HTTP includes
 
 ### **TOML Compatibility**
@@ -252,11 +252,9 @@ let port = config.get("server.port").unwrap().as_integer()?;  // Path-based acce
 Supported from TOML: bare, quoted and dotted keys, `[tables]` and `[[arrays of tables]]`
 in any order, basic and literal strings (single and multi-line, with TOML escapes such as
 `\u00E9`), integers in decimal/hex/octal/binary with `_` separators, `inf`/`nan` floats,
-and comments anywhere, including inside arrays. Defining the same key twice is an error,
-as in TOML.
-
-*Note: TOML date-time literals (`1979-05-27T15:32:00-08:00`) are not supported yet; quote
-them as strings.*
+date-time literals (`1979-05-27T07:32:00Z`, `1979-05-27`, `07:32:00`, read as
+`Value::DateTime(noml::Datetime)`), and comments anywhere, including inside arrays. Defining
+the same key twice is an error, as in TOML.
 
 ## 🎯 **Why Choose NOML?**
 
@@ -305,7 +303,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 ---
 
 <div align="center">
-    <strong>NOML 0.9.3 - High-Performance Dynamic Configuration</strong><br>
+    <strong>NOML 0.10.0 - High-Performance Dynamic Configuration</strong><br>
     <em>Blazing-fast • Feature-rich • Format-preserving</em>
 </div>
 
@@ -342,7 +340,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-noml = { version = "0.9", features = ["async"] }
+noml = { version = "0.10", features = ["async"] }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -479,7 +477,7 @@ assert_eq!(updated_config.get("database.port").unwrap().as_integer()?, 5432);
 
 ```toml
 [dependencies]
-noml = { version = "0.9", features = ["async"] }
+noml = { version = "0.10", features = ["async"] }
 tokio = { version = "1.0", features = ["full"] }
 ```
 

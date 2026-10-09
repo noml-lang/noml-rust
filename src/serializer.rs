@@ -228,6 +228,13 @@ impl Serializer {
                     let _ = write!(self.output, "{value:?}");
                 }
             }
+            AstValue::DateTime { value, raw } => {
+                if raw.is_empty() {
+                    let _ = write!(self.output, "{value}");
+                } else {
+                    self.output.push_str(raw);
+                }
+            }
             AstValue::String { value, style, .. } => {
                 self.serialize_string(value, style);
             }

@@ -6,6 +6,37 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-09
+
+This release adds TOML date-time literals, which needs a new syntax-tree variant, so it is a breaking release. It also makes the remaining breaking cleanups at the same time, so the public enums can grow from here on without another break.
+
+### Added
+- **TOML date-time literals**: `1979-05-27T07:32:00Z`, `1979-05-27T07:32:00-08:00`, `1979-05-27 07:32:00` (space separator), local date-times, local dates (`1979-05-27`) and local times (`07:32:00`, fractional seconds, seconds optional). They parse into the new `noml::Datetime` (re-exported with `Date`, `Time` and `Offset`), which keeps exactly the parts that were written and does not depend on any date library. Invalid dates such as `2023-02-29` are parse errors with a position. Date-times round-trip through `serialize_document` with their original spelling, through `Config::save` in canonical form, and interpolate into strings as text. A bare key that looks like a date (`2024-01-01 = "x"`) is still a key.
+- **`Datetime`** implements `FromStr`, `Display`, `Serialize` and `Deserialize` (as text). With the `chrono` feature: `Datetime::to_chrono()` for offset date-times, `From<chrono::DateTime<Tz>>` for `Datetime` and `Value`.
+- **`Value::as_datetime()`, `Value::is_datetime()`**, `From<Datetime> for Value`.
+- **`ResolverConfig::interpolation`** (default `true`): with `false`, double-quoted strings are taken literally, as TOML does, and a bare `${path}` is an error. Useful for reading plain TOML files.
+- **`FieldType::Size` and `FieldType::Duration`** for schemas.
+
+### Changed (breaking)
+- **`#[non_exhaustive]`** on `Value`, `AstValue`, `NomlError`, `FieldType`, `TokenKind`, both `StringStyle` enums, `CommentStyle`, `LineEnding`, `FormatStyle` and on the `ResolverConfig` struct. Matches on these enums need a `_` arm. Build a `ResolverConfig` from `ResolverConfig::default()` and set its fields instead of using a struct literal.
+- **`Value::DateTime` holds a `noml::Datetime`** and exists in every build. It used to hold `chrono::DateTime<Utc>` and exist only with the `chrono` feature, which made the enum's shape depend on feature unification. The `chrono` feature now only adds conversions, and no longer enables chrono's `serde` feature.
+- **`@size(...)` returns `Value::Size` and `@duration(...)` returns `Value::Duration`** instead of `Value::Integer` and `Value::Float`, so the type says what the value is. `as_integer()` / `as_float()` still return the bytes / seconds, `Value::is_number()` is true for both, `Config::save` writes them back as `@size(...)` / `@duration(...)`, and schemas accept them where `Integer` / `Float` is expected. Code that matched `Value::Integer` on a size needs to match `Value::Size` (or use `as_integer()`).
+- **Schema `Float` fields accept integers**, so `timeout = 30` passes a float field.
+- **Removed `Config::get_or`**, deprecated in 0.9.3 because its default was never returned. Use `Config::get_with_default` (or `get_or_insert`).
+- **Removed `TokenKind::InterpolationEnd`**, which the lexer never produced.
+
+### Fixed
+- **Interpolation paths with quotes**: a quoted path segment containing `"` or `\` (for example `${r#"a"b"#}`) was written back by the serializer in a form that did not parse, and a quoted segment containing `}` cut a `"${...}"` reference short. Quoted segments are now escaped and read with `\"` and `\\` escapes.
+
+### Migration from 0.9
+- Add `_ => ...` arms where you match `Value`, `AstValue`, `NomlError` or `FieldType`.
+- Replace `ResolverConfig { a, b, ..Default::default() }` with `let mut c = ResolverConfig::default(); c.a = ...;`.
+- `Value::DateTime(chrono_dt)` becomes `Value::from(chrono_dt)`; read it back with `value.as_datetime()?.to_chrono()`.
+- Sizes and durations: prefer `as_integer()` / `as_float()` over matching `Value::Integer` / `Value::Float`.
+- `config.get_or(key, d)?` becomes `config.get_with_default(key, d)`.
+
+MSRV is unchanged at 1.82. Parsing speed is unchanged (within benchmark noise).
+
 ## [0.9.3] - 2026-10-09
 
 ### Added
@@ -254,7 +285,8 @@
 
 <!-- FOOTER
 ###################################################-->
-[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.9.3...HEAD
+[unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/noml-lang/noml-rust/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/noml-lang/noml-rust/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/noml-lang/noml-rust/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/noml-lang/noml-rust/compare/v0.9.0...v0.9.1

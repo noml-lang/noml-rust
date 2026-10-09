@@ -49,8 +49,21 @@ use std::sync::Arc;
 #[cfg(feature = "async")]
 use std::time::Duration;
 
-/// Configuration for the resolver
+/// Configuration for the resolver.
+///
+/// Start from [`ResolverConfig::default()`] and set the fields you need; the
+/// struct is `#[non_exhaustive]` so options can be added without breaking
+/// your code.
+///
+/// ```rust
+/// use noml::ResolverConfig;
+///
+/// let mut config = ResolverConfig::default();
+/// config.allow_missing_env = true;
+/// config.interpolation = false; // read `${...}` as plain text
+/// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolverConfig {
     /// Base path for resolving relative includes
     pub base_path: Option<PathBuf>,
@@ -62,6 +75,11 @@ pub struct ResolverConfig {
     pub allow_missing_env: bool,
     /// Custom native type resolvers
     pub native_resolvers: HashMap<String, NativeResolver>,
+    /// Whether `${...}` is interpolated (default `true`).
+    ///
+    /// With `false`, double-quoted strings are taken literally, as TOML
+    /// does, and a bare `${path}` value is an error.
+    pub interpolation: bool,
     /// HTTP client timeout for remote includes (async feature only)
     #[cfg(feature = "async")]
     pub http_timeout: Duration,
@@ -93,6 +111,7 @@ impl Default for ResolverConfig {
             max_include_depth: 10,
             allow_missing_env: false,
             native_resolvers,
+            interpolation: true,
             #[cfg(feature = "async")]
             http_timeout: Duration::from_secs(30),
             #[cfg(feature = "async")]
@@ -322,8 +341,9 @@ impl Resolver {
             AstValue::Bool(b) => Value::Bool(*b),
             AstValue::Integer { value, .. } => Value::Integer(*value),
             AstValue::Float { value, .. } => Value::Float(*value),
+            AstValue::DateTime { value, .. } => Value::DateTime(*value),
             AstValue::String { value, style, .. } => {
-                if is_template(value, *style) {
+                if self.config.interpolation && is_template(value, *style) {
                     return Ok(Built::Deferred);
                 }
                 Value::String(value.clone())
@@ -364,7 +384,7 @@ impl Resolver {
                 Value::Table(table)
             }
             AstValue::FunctionCall { args, .. } | AstValue::Native { args, .. } => {
-                if args.iter().any(has_template) {
+                if self.config.interpolation && args.iter().any(has_template) {
                     return Ok(Built::Deferred);
                 }
                 let values = args
@@ -373,7 +393,18 @@ impl Resolver {
                     .collect::<Result<Vec<_>>>()?;
                 self.call(node, values)?
             }
-            AstValue::Interpolation { .. } => return Ok(Built::Deferred),
+            AstValue::Interpolation { path } => {
+                if !self.config.interpolation {
+                    return Err(interpolation_error(
+                        format!(
+                            "Interpolation is disabled, but '${{{path}}}' is used at line {}, column {}",
+                            node.span.start_line, node.span.start_column
+                        ),
+                        path,
+                    ));
+                }
+                return Ok(Built::Deferred);
+            }
             AstValue::Include { path } => {
                 self.resolve_include(path, &node.span, location, scopes, run)?
             }
@@ -490,8 +521,9 @@ impl Resolver {
             AstValue::Bool(b) => Ok(Value::Bool(*b)),
             AstValue::Integer { value, .. } => Ok(Value::Integer(*value)),
             AstValue::Float { value, .. } => Ok(Value::Float(*value)),
+            AstValue::DateTime { value, .. } => Ok(Value::DateTime(*value)),
             AstValue::String { value, style, .. } => {
-                if is_template(value, *style) {
+                if self.config.interpolation && is_template(value, *style) {
                     Ok(Value::String(self.render(value, span, ctx)?))
                 } else {
                     Ok(Value::String(value.clone()))
@@ -545,7 +577,7 @@ impl Resolver {
                 out.push_str("${");
                 rest = after;
             } else if tail.starts_with("${") {
-                let close = tail.find('}').ok_or_else(|| {
+                let close = reference_end(tail).ok_or_else(|| {
                     interpolation_error(
                         format!(
                             "Unclosed '${{' in string at line {}, column {}",
@@ -916,6 +948,28 @@ fn has_template(node: &AstNode) -> bool {
     }
 }
 
+/// Byte position of the `}` that closes the `${` at the start of `tail`,
+/// skipping braces inside quoted path segments.
+fn reference_end(tail: &str) -> Option<usize> {
+    let mut in_quote = false;
+    let mut escaped = false;
+    for (i, c) in tail.char_indices().skip(2) {
+        if in_quote {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, '\\') => escaped = true,
+                (false, '"') => in_quote = false,
+                _ => {}
+            }
+        } else if c == '"' {
+            in_quote = true;
+        } else if c == '}' {
+            return Some(i);
+        }
+    }
+    None
+}
+
 /// Split a reference like `a.b`, `servers.0.name`, `servers[0].name` or
 /// `"dotted.key".x` into its segments.
 fn parse_reference(expression: &str) -> std::result::Result<Vec<String>, &'static str> {
@@ -927,8 +981,25 @@ fn parse_reference(expression: &str) -> std::result::Result<Vec<String>, &'stati
     loop {
         rest = rest.trim_start();
         let (name, after) = if let Some(quoted) = rest.strip_prefix('"') {
-            let end = quoted.find('"').ok_or("Unclosed quote")?;
-            (quoted[..end].to_string(), &quoted[end + 1..])
+            // Quoted segment; `\"` and `\\` are escapes
+            let mut name = String::new();
+            let mut chars = quoted.char_indices();
+            let mut end = None;
+            while let Some((i, c)) = chars.next() {
+                match c {
+                    '"' => {
+                        end = Some(i);
+                        break;
+                    }
+                    '\\' => match chars.next() {
+                        Some((_, escaped)) => name.push(escaped),
+                        None => return Err("Unclosed quote"),
+                    },
+                    c => name.push(c),
+                }
+            }
+            let end = end.ok_or("Unclosed quote")?;
+            (name, &quoted[end + 1..])
         } else {
             let end = rest.find(['.', '[']).unwrap_or(rest.len());
             let name = rest[..end].trim();
@@ -983,8 +1054,9 @@ fn append_text(out: &mut String, value: &Value, expression: &str, span: &Span) -
         Value::Duration(seconds) => {
             let _ = write!(out, "{seconds}");
         }
-        #[cfg(feature = "chrono")]
-        Value::DateTime(dt) => out.push_str(&dt.to_rfc3339()),
+        Value::DateTime(dt) => {
+            let _ = write!(out, "{dt}");
+        }
         other => {
             return Err(interpolation_error(
                 format!(
@@ -1080,7 +1152,8 @@ fn single_string_arg<'v>(name: &str, args: &'v [Value]) -> Result<&'v str> {
 fn resolve_size(args: &[Value]) -> Result<Value> {
     let size_str = single_string_arg("size", args)?;
     match parse_size(size_str) {
-        Some(n) => Ok(Value::Integer(n)),
+        // parse_size never returns a negative value
+        Some(n) => Ok(Value::Size(n.unsigned_abs())),
         None => Err(NomlError::parse(
             format!("Invalid size: '{size_str}' (expected a non-negative number with an optional unit such as KB, MB or GiB, up to 8 EiB)"),
             0,
@@ -1130,7 +1203,7 @@ pub(crate) fn parse_size(size_str: &str) -> Option<i64> {
 fn resolve_duration(args: &[Value]) -> Result<Value> {
     let duration_str = single_string_arg("duration", args)?;
     match parse_duration(duration_str) {
-        Some(n) => Ok(Value::Float(n)),
+        Some(n) => Ok(Value::Duration(n)),
         None => Err(NomlError::parse(
             format!("Invalid duration: '{duration_str}' (expected a non-negative number with a unit such as ms, s, m, h or d)"),
             0,
@@ -1413,6 +1486,8 @@ mod tests {
         assert_eq!(parse_reference("s[0].name").unwrap(), ["s", "0", "name"]);
         assert_eq!(parse_reference("s.0.name").unwrap(), ["s", "0", "name"]);
         assert_eq!(parse_reference("\"a.b\".c").unwrap(), ["a.b", "c"]);
+        assert_eq!(parse_reference(r#""a\"b".c"#).unwrap(), ["a\"b", "c"]);
+        assert_eq!(reference_end(r#"${"x}y".z} rest"#), Some(9));
         assert!(parse_reference("").is_err());
         assert!(parse_reference("a..b").is_err());
         assert!(parse_reference("a[x]").is_err());

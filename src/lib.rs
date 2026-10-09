@@ -46,6 +46,7 @@
 //! - **🌐 HTTP includes** via `include "https://example.com/config.noml"`
 //! - **🔗 Variable interpolation** via `"Hello ${name}!"`
 //! - **⚡ Native types** like `@size("10MB")`, `@duration("30s")`, `@ip("127.0.0.1")`
+//! - **📅 Date-time literals** as in TOML: `1979-05-27T07:32:00Z`, `1979-05-27`, `07:32:00`
 //! - **✅ Schema validation** for type safety and error prevention
 //! - **💬 Comment preservation** for tooling and round-trip editing
 //! - **🎯 Detailed error reporting** with precise source locations
@@ -135,7 +136,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! noml = { version = "0.9", features = ["async"] }
+//! noml = { version = "0.10", features = ["async"] }
 //! ```
 //!
 //! ```rust,ignore
@@ -191,11 +192,9 @@
 //! env_vars.insert("APP_NAME".to_string(), "my-app".to_string());
 //!
 //! // Custom resolver configuration
-//! let config = ResolverConfig {
-//!     env_vars: Some(env_vars),
-//!     allow_missing_env: true,
-//!     ..Default::default()
-//! };
+//! let mut config = ResolverConfig::default();
+//! config.env_vars = Some(env_vars);
+//! config.allow_missing_env = true;
 //!
 //! let mut resolver = Resolver::with_config(config);
 //! let document = parse_string(r#"name = env("APP_NAME")"#, None)?;
@@ -210,6 +209,7 @@
 #![warn(clippy::all)]
 
 pub mod config;
+pub mod datetime;
 pub mod error;
 pub mod macros;
 pub mod parser;
@@ -222,6 +222,7 @@ mod tree;
 
 // Re-export main types for convenience
 pub use config::Config;
+pub use datetime::{Date, Datetime, Offset, Time};
 pub use error::{NomlError, Result};
 pub use parser::ast::AstNode;
 pub use parser::{parse_file, parse_string, Document};

@@ -4,6 +4,7 @@
 //! This lexer is designed for maximum speed while preserving all source
 //! information needed for perfect round-trip serialization.
 
+use crate::datetime::{self, Datetime};
 use crate::error::{NomlError, Result};
 use crate::parser::Span;
 use std::fmt;
@@ -21,6 +22,7 @@ pub struct Token<'a> {
 
 /// Token types with associated data
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum TokenKind<'a> {
     // Literals
     /// String literal with quote style and processed value
@@ -49,6 +51,14 @@ pub enum TokenKind<'a> {
 
     /// Boolean literal
     Bool(bool),
+
+    /// Date and/or time literal such as `1979-05-27T07:32:00Z`
+    DateTime {
+        /// Parsed value
+        value: Datetime,
+        /// Original text
+        raw: &'a str,
+    },
 
     /// Null literal
     Null,
@@ -95,9 +105,6 @@ pub enum TokenKind<'a> {
     /// ${ (start of interpolation)
     InterpolationStart,
 
-    /// } (end of interpolation - context-dependent)
-    InterpolationEnd,
-
     /// @ (native type constructor prefix)
     At,
 
@@ -124,6 +131,7 @@ pub enum TokenKind<'a> {
 
 /// String quoting styles
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum StringStyle {
     /// Double quotes "string"
     Double,
@@ -231,8 +239,22 @@ impl<'a> Lexer<'a> {
                 Ok(self.make_token(TokenKind::Float { value, raw }))
             }
 
-            // Numbers
-            '0'..='9' => self.lex_number(),
+            // Dates and times, then numbers
+            '0'..='9' => match datetime::lex(self.rest()) {
+                Ok(Some((value, len))) => {
+                    // Date/time literals are ASCII, so one byte is one column
+                    self.pos += len;
+                    self.column += len;
+                    let raw = &self.input[self.token_start..self.pos];
+                    Ok(self.make_token(TokenKind::DateTime { value, raw }))
+                }
+                Ok(None) => self.lex_number(),
+                Err(message) => Err(NomlError::parse(
+                    format!("{message}: {}", self.datetime_text()),
+                    self.line,
+                    self.column,
+                )),
+            },
             '-' | '+' if matches!(self.peek_char(), Some('0'..='9')) => self.lex_number(),
 
             // Symbols
@@ -365,6 +387,15 @@ impl<'a> Lexer<'a> {
     #[inline]
     fn is_eof(&self) -> bool {
         self.pos >= self.input.len()
+    }
+
+    /// The date/time-looking text at the current position, for error messages
+    fn datetime_text(&self) -> &'a str {
+        let rest = self.rest();
+        let end = rest
+            .find(|c: char| c.is_whitespace() || matches!(c, ',' | ']' | '}' | '#'))
+            .unwrap_or(rest.len());
+        &rest[..end]
     }
 
     /// True if the input at the current position is `+inf`, `-inf`, `+nan` or `-nan`
@@ -829,6 +860,7 @@ impl fmt::Display for TokenKind<'_> {
             TokenKind::Integer { value, .. } => write!(f, "{value}"),
             TokenKind::Float { value, .. } => write!(f, "{value}"),
             TokenKind::Bool(b) => write!(f, "{b}"),
+            TokenKind::DateTime { raw, .. } => write!(f, "{raw}"),
             TokenKind::Null => write!(f, "null"),
             TokenKind::Identifier(name) => write!(f, "{name}"),
             TokenKind::EnvFunc => write!(f, "env"),
@@ -843,7 +875,6 @@ impl fmt::Display for TokenKind<'_> {
             TokenKind::LeftParen => write!(f, "("),
             TokenKind::RightParen => write!(f, ")"),
             TokenKind::InterpolationStart => write!(f, "${{"),
-            TokenKind::InterpolationEnd => write!(f, "}}"),
             TokenKind::At => write!(f, "@"),
             TokenKind::Comment { text } => write!(f, "# {text}"),
             TokenKind::Whitespace => write!(f, "<ws>"),

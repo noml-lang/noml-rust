@@ -143,6 +143,21 @@ timeout = ${database_config.timeout}
 Relative paths are resolved from the directory of the file that contains the
 `include`. Include cycles and includes nested more than 10 levels deep are errors.
 
+#### Dates and Times
+TOML date-time literals are written bare and read as date/time values:
+
+```noml
+created  = 1979-05-27T07:32:00Z         # offset date-time
+deadline = 1979-05-27 07:32:00-08:00    # a space may replace the T
+local    = 1979-05-27T07:32:00.999      # local date-time
+birthday = 1979-05-27                   # local date
+alarm    = 07:32:00                     # local time
+```
+
+Invalid dates such as `2023-02-29` are parse errors. In Rust they are
+`Value::DateTime(noml::Datetime)`; with the `chrono` feature an offset date-time converts
+to a `chrono` date-time.
+
 #### Native Type Constructors
 Parse and validate common types at configuration time:
 

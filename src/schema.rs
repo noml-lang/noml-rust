@@ -92,7 +92,11 @@ pub struct FieldSchema {
 }
 
 /// Supported field types for validation
+///
+/// `Integer` also accepts sizes (`@size(...)`), and `Float` accepts integers
+/// and durations (`@duration(...)`).
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum FieldType {
     /// String value
     String,
@@ -104,8 +108,12 @@ pub enum FieldType {
     Bool,
     /// Binary data
     Binary,
-    /// DateTime value
+    /// Date and/or time value
     DateTime,
+    /// Size in bytes, from `@size(...)` (plain integers are accepted too)
+    Size,
+    /// Duration in seconds, from `@duration(...)` (plain numbers are accepted too)
+    Duration,
     /// Array of specific type
     Array(Box<FieldType>),
     /// Table/object with nested schema
@@ -258,11 +266,15 @@ impl Schema {
     ) -> Result<()> {
         match (value, expected_type) {
             (Value::String(_), FieldType::String) => Ok(()),
-            (Value::Integer(_), FieldType::Integer) => Ok(()),
-            (Value::Float(_), FieldType::Float) => Ok(()),
+            (Value::Integer(_) | Value::Size(_), FieldType::Integer) => Ok(()),
+            (Value::Float(_) | Value::Integer(_) | Value::Duration(_), FieldType::Float) => Ok(()),
+            (Value::Size(_), FieldType::Size) => Ok(()),
+            (Value::Integer(i), FieldType::Size) if *i >= 0 => Ok(()),
+            (Value::Duration(_) | Value::Float(_) | Value::Integer(_), FieldType::Duration) => {
+                Ok(())
+            }
             (Value::Bool(_), FieldType::Bool) => Ok(()),
             (Value::Binary(_), FieldType::Binary) => Ok(()),
-            #[cfg(feature = "chrono")]
             (Value::DateTime(_), FieldType::DateTime) => Ok(()),
             (_, FieldType::Any) => Ok(()),
 
@@ -316,7 +328,6 @@ impl Schema {
             Value::Size(_) => "Size",
             Value::Duration(_) => "Duration",
             Value::Binary(_) => "Binary",
-            #[cfg(feature = "chrono")]
             Value::DateTime(_) => "DateTime",
         }
     }

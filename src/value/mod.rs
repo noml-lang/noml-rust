@@ -12,7 +12,8 @@
 //! - **Primitives**: `null`, `bool`, `i64`, `f64`, `String`
 //! - **Collections**: `Array<Value>`, `Table<String, Value>`
 //! - **Native Types**: `Size`, `Duration`, `Binary`
-//! - **Optional**: `DateTime` (with `chrono` feature)
+//! - **Date and time**: `DateTime` (TOML date-time literals; converts to
+//!   `chrono` with the `chrono` feature)
 //!
 //! ## Type Conversions
 //!
@@ -99,15 +100,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
-#[cfg(feature = "chrono")]
-use chrono::{DateTime, Utc};
+use crate::datetime::Datetime;
 
 /// A NOML value - the fundamental unit of data in NOML documents.
 ///
 /// Values are designed to be lightweight, cloneable, and convertible
 /// to/from Rust native types with zero-copy operations where possible.
+///
+/// The enum is `#[non_exhaustive]`: match it with a `_` arm so new value
+/// types can be added without breaking your code.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
+#[non_exhaustive]
 pub enum Value {
     /// Null/empty value
     Null,
@@ -130,10 +134,9 @@ pub enum Value {
     /// Table/object with string keys
     Table(BTreeMap<String, Value>),
 
-    /// Native date/time value (optional feature)
-    #[cfg(feature = "chrono")]
-    #[serde(with = "chrono::serde::ts_seconds")]
-    DateTime(DateTime<Utc>),
+    /// Date and/or time, from a TOML date-time literal such as
+    /// `1979-05-27T07:32:00Z` (see [`Datetime`])
+    DateTime(Datetime),
 
     /// Raw binary data
     Binary(Vec<u8>),
@@ -207,7 +210,6 @@ impl Value {
             Value::String(_) => "string",
             Value::Array(_) => "array",
             Value::Table(_) => "table",
-            #[cfg(feature = "chrono")]
             Value::DateTime(_) => "datetime",
             Value::Binary(_) => "binary",
             Value::Size(_) => "size",
@@ -226,9 +228,31 @@ impl Value {
         matches!(self, Value::Bool(_))
     }
 
-    /// Check if this value is a number (integer or float)
+    /// Check if this value is a number (integer, float, size or duration)
     pub fn is_number(&self) -> bool {
-        matches!(self, Value::Integer(_) | Value::Float(_))
+        matches!(
+            self,
+            Value::Integer(_) | Value::Float(_) | Value::Size(_) | Value::Duration(_)
+        )
+    }
+
+    /// Check if this value is a date and/or time
+    pub fn is_datetime(&self) -> bool {
+        matches!(self, Value::DateTime(_))
+    }
+
+    /// Get the date/time, or an error for other types.
+    ///
+    /// Strings are not parsed; use `str::parse::<Datetime>()` for that.
+    pub fn as_datetime(&self) -> Result<&Datetime> {
+        match self {
+            Value::DateTime(dt) => Ok(dt),
+            _ => Err(NomlError::type_error(
+                format!("<{}>", self.type_name()),
+                "datetime",
+                self.type_name(),
+            )),
+        }
     }
 
     /// Check if this value is a string
@@ -590,8 +614,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
-            #[cfg(feature = "chrono")]
-            Value::DateTime(dt) => write!(f, "{}", dt.format("%Y-%m-%dT%H:%M:%SZ")),
+            Value::DateTime(dt) => write!(f, "{dt}"),
             Value::Binary(data) => write!(f, "<{} bytes>", data.len()),
             Value::Size(bytes) => write!(f, "{}", format_size(*bytes)),
             Value::Duration(seconds) => write!(f, "{}", format_duration(*seconds)),
@@ -637,6 +660,19 @@ fn format_duration(seconds: f64) -> String {
 }
 
 // Implement From traits for easy value creation
+impl From<Datetime> for Value {
+    fn from(dt: Datetime) -> Self {
+        Value::DateTime(dt)
+    }
+}
+
+#[cfg(feature = "chrono")]
+impl<Tz: chrono::TimeZone> From<chrono::DateTime<Tz>> for Value {
+    fn from(dt: chrono::DateTime<Tz>) -> Self {
+        Value::DateTime(Datetime::from(dt))
+    }
+}
+
 impl From<bool> for Value {
     fn from(b: bool) -> Self {
         Value::Bool(b)
