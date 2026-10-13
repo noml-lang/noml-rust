@@ -50,7 +50,7 @@ jobs:
       #     output-file-path: benchmark_results.json
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: |
