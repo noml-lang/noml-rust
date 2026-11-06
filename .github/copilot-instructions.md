@@ -70,7 +70,7 @@ cargo run -- parse file.noml     # CLI parsing/display
 - Release profile: `opt-level = 3`, `lto = true`, `codegen-units = 1`
 
 ## Dependencies & Features
-- **Required**: `indexmap` (preserves key order), `serde`, `tempfile`, `thiserror`
+- **Required**: `indexmap` (preserves key order), `serde`, `tempfile`, `define-err`
 - **Optional**: `chrono` feature for DateTime support
 - **Dev**: `criterion` (benchmarks), `tokio-test`
 
