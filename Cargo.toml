@@ -124,7 +124,7 @@ harness = false
 
 # Error handling
 #══════════════════════════════════════════⬡
-define-err = "0.7"
+define-err = "0.8"
 chrono = { version = "0.4", optional = true }
 
 # Async runtime (optional)
