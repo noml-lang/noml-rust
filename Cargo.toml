@@ -141,7 +141,7 @@ serde = { version = "1.0.226", features = ["derive"] }
 
 # HTTP client for remote includes (optional)
 #══════════════════════════════════════════⬡
-reqwest = { version = "0.12", optional = true }
+reqwest = { version = "0.13", optional = true }
 #░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
 
 
