@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `NomlError` is declared with `define-err` instead of `thiserror`: no proc macro and no build dependency. Its variants, fields, messages, `source()`, and `#[non_exhaustive]` are unchanged, and so are `category()`, `is_recoverable()`, and `user_message()`.
+
 ## [0.10.0] - 2026-10-09
 
 This release adds TOML date-time literals, which needs a new syntax-tree variant, so it is a breaking release. It also makes the remaining breaking cleanups at the same time, so the public enums can grow from here on without another break.
