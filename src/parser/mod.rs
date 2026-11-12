@@ -8,13 +8,12 @@
 //!
 //! The parser consists of three main components:
 //!
-//! - **[`lexer`]** - Zero-copy tokenizer that produces a stream of tokens
+//! - **[`lexer`]** - Tokenizer that produces a stream of tokens
 //! - **[`grammar`]** - Recursive descent parser that builds the AST
 //! - **[`ast`]** - Abstract syntax tree with full source information
 //!
 //! ## Key Features
 //!
-//! - **Zero-copy lexing** - Tokens reference the original source string
 //! - **Source preservation** - Comments, whitespace, and formatting retained
 //! - **Precise error reporting** - Line/column information for all errors
 //! - **Full AST** - Complete representation of the parsed document

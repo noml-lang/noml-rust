@@ -129,7 +129,7 @@ pub fn parse(source: &str) -> Result<Value>
 - `Result<Value>` - Resolved configuration data or `NomlError`
 
 **Description:**
-Main entry point for parsing NOML configuration. Performs complete parsing and resolution including environment variables, file includes, interpolation, and native types.
+Main entry point for parsing NOML configuration. Performs complete parsing and resolution including environment variables, interpolation, and native types. Text parsed with `parse()` has no directory, so it cannot use `include` (use `parse_from_file()`, or a `Resolver` with `with_include_root`). Resolution is bounded by the default [resolver limits](#resolver-limits).
 
 **Examples:**
 
@@ -182,7 +182,31 @@ pub fn parse_from_file<P: AsRef<Path>>(path: P) -> Result<Value>
 - `Result<Value>` - Resolved configuration data or `NomlError`
 
 **Description:**
-Parse NOML configuration from a file with full resolution. Sets the base path for relative includes.
+Parse NOML configuration from a file with full resolution. Sets the base path for relative includes. Included files must be inside the directory of the file (checked on the canonical path, so `..`, absolute paths and symbolic links cannot leave it).
+
+<h4 id="resolver-limits">Resolver limits and includes</h4>
+
+Every resolve is bounded by `ResolverLimits`. Change them with `Resolver::with_limits`:
+
+| Limit | Default | Setter |
+|-------|---------|--------|
+| Total size of the values copied by `${...}` references | 64 MiB | `with_max_output_bytes` |
+| Number of `${...}` references | 10,000 | `with_max_references` |
+| Length of a chain of references | 32 | `with_max_reference_depth` |
+| Number of included files, over all levels | 256 | `with_max_includes` |
+| Body of an HTTP include (`async`) | 1 MiB | `with_max_http_body_bytes` |
+
+Going over a limit is a `NomlError::Parse` with the line and column of the reference or include. `Resolver::with_include_root(dir)` allows includes anywhere under `dir`, and `Resolver::allow_includes_anywhere(true)` turns the check off. Setting `ResolverConfig::max_include_depth` to 0 refuses every include.
+
+```rust
+use noml::{parse_string, Resolver, ResolverLimits};
+
+let document = parse_string(&std::fs::read_to_string("config/app.noml")?, None)?;
+let value = Resolver::new()
+    .with_include_root("config")
+    .with_limits(ResolverLimits::new().with_max_reference_depth(8))
+    .resolve(&document)?;
+```
 
 **Examples:**
 
@@ -881,7 +905,7 @@ pub fn save(&self) -> Result<()>
 - `Result<()>` - Ok if saved successfully
 
 **Description:**
-Save configuration back to its source file (if loaded from file).
+Save configuration back to its source file (if loaded from file). Values that came from an expression in the file (`env("NAME")`, `include "file"`, `${path}`, `@size("10MB")`) and were not changed are written back as the expression, so secrets read with `env()` are not written to disk. Comments and layout are not kept; use `save_preserving()` for that. The file is replaced atomically.
 
 **Examples:**
 
@@ -909,7 +933,7 @@ pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()>
 - `Result<()>` - Ok if saved successfully
 
 **Description:**
-Save configuration to a specified file.
+Save configuration to a specified file. The text is written to a temporary file in the same directory, synced, and renamed over the target, so a crash never leaves a half-written file. A symbolic link at the target is replaced, not followed. On Unix the new file keeps the permissions of the file it replaces.
 
 **Examples:**
 
