@@ -1,6 +1,6 @@
 //! # NOML Lexer
 //!
-//! High-performance tokenizer for NOML using zero-copy string slicing.
+//! High-performance tokenizer for NOML.
 //! This lexer is designed for maximum speed while preserving all source
 //! information needed for perfect round-trip serialization.
 
@@ -148,7 +148,7 @@ pub enum StringStyle {
     },
 }
 
-/// High-performance lexer with zero-copy tokenization
+/// High-performance lexer
 pub struct Lexer<'a> {
     /// Input source text
     input: &'a str,
@@ -249,11 +249,8 @@ impl<'a> Lexer<'a> {
                     Ok(self.make_token(TokenKind::DateTime { value, raw }))
                 }
                 Ok(None) => self.lex_number(),
-                Err(message) => Err(NomlError::parse(
-                    format!("{message}: {}", self.datetime_text()),
-                    self.line,
-                    self.column,
-                )),
+                // The text is not repeated: errors must not quote the input
+                Err(message) => Err(NomlError::parse(message, self.line, self.column)),
             },
             '-' | '+' if matches!(self.peek_char(), Some('0'..='9')) => self.lex_number(),
 
@@ -387,15 +384,6 @@ impl<'a> Lexer<'a> {
     #[inline]
     fn is_eof(&self) -> bool {
         self.pos >= self.input.len()
-    }
-
-    /// The date/time-looking text at the current position, for error messages
-    fn datetime_text(&self) -> &'a str {
-        let rest = self.rest();
-        let end = rest
-            .find(|c: char| c.is_whitespace() || matches!(c, ',' | ']' | '}' | '#'))
-            .unwrap_or(rest.len());
-        &rest[..end]
     }
 
     /// True if the input at the current position is `+inf`, `-inf`, `+nan` or `-nan`
@@ -571,7 +559,7 @@ impl<'a> Lexer<'a> {
                         || !digits.bytes().all(|b| b.is_ascii_hexdigit())
                     {
                         return Err(NomlError::parse(
-                            format!("Invalid unicode escape: \\u{{{digits}}}"),
+                            "Invalid unicode escape: expected 1 to 6 hex digits in braces",
                             line,
                             column,
                         ));
@@ -597,16 +585,11 @@ impl<'a> Lexer<'a> {
                     }
                     &self.input[start..start + want]
                 };
-                let code = u32::from_str_radix(digits, 16).map_err(|_| {
-                    NomlError::parse(
-                        format!("Invalid unicode escape value: {digits}"),
-                        line,
-                        column,
-                    )
-                })?;
+                let code = u32::from_str_radix(digits, 16)
+                    .map_err(|_| NomlError::parse("Invalid unicode escape value", line, column))?;
                 let c = char::from_u32(code).ok_or_else(|| {
                     NomlError::parse(
-                        format!("Invalid unicode code point: U+{code:X}"),
+                        "Invalid unicode code point (a surrogate or above U+10FFFF)",
                         line,
                         column,
                     )
@@ -614,12 +597,8 @@ impl<'a> Lexer<'a> {
                 value.push(c);
                 return Ok(());
             }
-            other => {
-                return Err(NomlError::parse(
-                    format!("Invalid escape sequence: \\{other}"),
-                    line,
-                    column,
-                ));
+            _ => {
+                return Err(NomlError::parse("Invalid escape sequence", line, column));
             }
         }
         self.advance();
@@ -780,7 +759,7 @@ impl<'a> Lexer<'a> {
         let raw_text = &self.input[start_pos..self.pos];
         let invalid = |kind: &str| {
             NomlError::parse(
-                format!("Invalid {kind} literal: {raw_text}"),
+                format!("Invalid {kind} literal"),
                 self.token_start_line,
                 self.token_start_column,
             )
@@ -850,6 +829,40 @@ impl<'a> Lexer<'a> {
         };
 
         Ok(self.make_token(kind))
+    }
+}
+
+impl TokenKind<'_> {
+    /// The kind of token, for error messages. Unlike `Display`, this never
+    /// includes the token's text, which may be a secret.
+    pub(crate) fn describe(&self) -> &'static str {
+        match self {
+            TokenKind::String { .. } => "a string",
+            TokenKind::Integer { .. } => "an integer",
+            TokenKind::Float { .. } => "a float",
+            TokenKind::DateTime { .. } => "a date-time",
+            TokenKind::Bool(_) => "a boolean",
+            TokenKind::Null => "null",
+            TokenKind::Identifier(_) => "an identifier",
+            TokenKind::EnvFunc => "env",
+            TokenKind::Include => "include",
+            TokenKind::Equals => "'='",
+            TokenKind::Dot => "'.'",
+            TokenKind::Comma => "','",
+            TokenKind::LeftBracket => "'['",
+            TokenKind::RightBracket => "']'",
+            TokenKind::LeftBrace => "'{'",
+            TokenKind::RightBrace => "'}'",
+            TokenKind::LeftParen => "'('",
+            TokenKind::RightParen => "')'",
+            TokenKind::InterpolationStart => "'${'",
+            TokenKind::At => "'@'",
+            TokenKind::Comment { .. } => "a comment",
+            TokenKind::Whitespace => "whitespace",
+            TokenKind::Newline => "a newline",
+            TokenKind::Eof => "the end of the input",
+            TokenKind::Invalid(_) => "an invalid character",
+        }
     }
 }
 

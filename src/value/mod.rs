@@ -105,7 +105,7 @@ use crate::datetime::Datetime;
 /// A NOML value - the fundamental unit of data in NOML documents.
 ///
 /// Values are designed to be lightweight, cloneable, and convertible
-/// to/from Rust native types with zero-copy operations where possible.
+/// to/from Rust native types.
 ///
 /// The enum is `#[non_exhaustive]`: match it with a `_` arm so new value
 /// types can be added without breaking your code.
@@ -330,7 +330,11 @@ impl Value {
                 {
                     Ok(false)
                 } else {
-                    Err(NomlError::type_error(s, "boolean", self.type_name()))
+                    Err(NomlError::type_error(
+                        "<string>",
+                        "boolean",
+                        self.type_name(),
+                    ))
                 }
             }
             Value::Integer(i) => Ok(*i != 0),
@@ -351,15 +355,15 @@ impl Value {
                 if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
                     Ok(*f as i64)
                 } else {
-                    Err(NomlError::type_error(f.to_string(), "integer", "float"))
+                    Err(NomlError::type_error("<float>", "integer", "float"))
                 }
             }
             Value::String(s) => s
                 .parse::<i64>()
-                .map_err(|_| NomlError::type_error(s, "integer", "string")),
+                .map_err(|_| NomlError::type_error("<string>", "integer", "string")),
             Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
             Value::Size(bytes) => i64::try_from(*bytes)
-                .map_err(|_| NomlError::type_error(bytes.to_string(), "integer", "size")),
+                .map_err(|_| NomlError::type_error("<size>", "integer", "size")),
             _ => Err(NomlError::type_error(
                 format!("<{}>", self.type_name()),
                 "integer",
@@ -378,7 +382,7 @@ impl Value {
             Value::Size(bytes) => Ok(*bytes as f64),
             Value::String(s) => s
                 .parse::<f64>()
-                .map_err(|_| NomlError::type_error(s, "float", "string")),
+                .map_err(|_| NomlError::type_error("<string>", "float", "string")),
             _ => Err(NomlError::type_error(
                 format!("<{}>", self.type_name()),
                 "float",

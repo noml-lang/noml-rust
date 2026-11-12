@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+The security fixes and limits released in 0.9.4 (see below) are part of this line too: `ResolverLimits`, include roots, errors without input text, `Config::save` keeping expressions, atomic saves, confined HTTP includes, linear-time table headers and exact `@size`.
+
 ## [0.10.0] - 2026-10-09
 
 This release adds TOML date-time literals, which needs a new syntax-tree variant, so it is a breaking release. It also makes the remaining breaking cleanups at the same time, so the public enums can grow from here on without another break.
@@ -36,6 +38,35 @@ This release adds TOML date-time literals, which needs a new syntax-tree variant
 - `config.get_or(key, d)?` becomes `config.get_with_default(key, d)`.
 
 MSRV is unchanged at 1.82. Parsing speed is unchanged (within benchmark noise).
+
+## [0.9.4] - 2026-11-12
+
+### Security
+- **`${...}` expansion is bounded.** Each reference copies the value it names, so a few lines such as `l1 = "${l0}${l0}..."` could describe a string of gigabytes (424 bytes of text became 100 MB). Every resolve now has limits, set with the new `ResolverLimits` and `Resolver::with_limits`: the values copied by references may total 64 MiB (`with_max_output_bytes`), a document may use 10,000 references (`with_max_references`), and a chain of references (a value that refers to a value that is itself a reference) may be 32 long (`with_max_reference_depth`). Copies of arrays and tables are charged for every element. Going over a limit is a `NomlError::Parse` with the line and column of the reference.
+- **Long reference chains no longer overflow the stack.** A chain written head first (`v999 = ${v998}` ... `v0 = 1`) was resolved by recursion, one level per link, so about 15 KB of text aborted the process. References are now settled from an explicit work stack, and a chain longer than the limit is an error, in whichever order it is written.
+- **Includes are confined to the include root.** `include` used to read any absolute path or `..` path. A target must now be inside the include root: the directory set with the new `Resolver::with_include_root`, or else the base path (the directory of the file for `parse_from_file`, `Config::from_file` and `Document::to_value`). The check is made on the canonical path, so `..`, absolute paths and symbolic links cannot leave the root. Text with no base path (`parse`, `Config::from_string`) can no longer include files; it used to resolve them against the current directory. `Resolver::allow_includes_anywhere(true)` restores the old behaviour for trusted documents.
+- **Include cycles and fan-out.** Cycle detection compares canonical paths, so `sub/../self.noml` is reported as a circular reference instead of running to the depth limit. A resolve may include 256 files in total (`ResolverLimits::with_max_includes`); a few files that each include the next several times used to take minutes.
+- **Errors no longer quote the document.** Parse errors repeated unquoted values (`password = hunter2`), comments, integer literals and escapes; `@size`, `@duration`, `@url`, `@ip`, `@semver`, `@base64` and `@uuid` repeated their argument; `Value::as_integer`, `as_float` and `as_bool` repeated the string or number; and a failed include repeated the first offending token of the included file, which for a credentials or `.env` file is the secret. Errors now give the position and the kind of problem only. A failed include reports the path as written and the line and column inside the included file.
+- **`Config::save` keeps expressions.** Saving wrote the resolved value of every key, so `password = env("DB_PASSWORD")` was saved as the password itself, and included files were copied inline. Values that came from `env()`, `include`, `${...}`, `@type()` or a string template, and were not changed, are now written back as the expression. Changed values are written as plain values, as before.
+- **Atomic saves.** `Config::save`, `Config::save_to_file`, `Config::save_async` and `save_preserving` write a temporary file in the same directory, sync it and rename it over the target, so a crash never leaves a half-written file. A symbolic link at the target is replaced instead of written through. On Unix the new file keeps the permissions of the old one.
+- **HTTP includes (`async` feature) are confined.** A remote document was resolved like a local file: it could include local files, read environment variables, and name values of the including document. It can now use none of these. Only `https://` URLs are fetched, redirects are not followed, and the body is limited to 1 MiB (`ResolverLimits::with_max_http_body_bytes`).
+- **Cargo.lock**: `tokio` 1.53.3 (RUSTSEC-2026-0386), `rustls` 0.23.46 (RUSTSEC-2026-0346 to 0349), `rustls-webpki` 0.103.16 (RUSTSEC-2026-0382) and `openssl` 0.10.82 (RUSTSEC-2026-0463 and RUSTSEC-2026-0473 to 0479), all in the optional `async` dependency tree.
+
+### Added
+- `ResolverLimits`, with `new`, `Default`, the `with_*` setters and getters above, and the constants `resolver::DEFAULT_MAX_OUTPUT_BYTES`, `DEFAULT_MAX_REFERENCES`, `DEFAULT_MAX_REFERENCE_DEPTH`, `DEFAULT_MAX_INCLUDES` and `DEFAULT_MAX_HTTP_BODY_BYTES`. Re-exported from the crate root.
+- `Resolver::with_limits`, `Resolver::limits`, `Resolver::with_include_root` and `Resolver::allow_includes_anywhere`.
+
+### Fixed
+- **Table headers took quadratic time.** Each `[table]` or `[[array]]` header searched every earlier entry, so 50,000 sections took over a second. Headers are now indexed, and parsing is linear in the number of sections.
+- **`@size` lost precision above 2^53 bytes.** The number went through `f64`, so `@size("9007199254740993")` gave 9007199254740992. Sizes are now computed with integers and are exact up to `i64::MAX`; a fraction of a byte is dropped, as before.
+
+### Changed
+- Error message texts changed where they quoted input: for example `Unexpected identifier 'x' where a value was expected` is now `Unexpected identifier where a value was expected`, `Invalid integer literal: 123x` is `Invalid integer literal`, `Invalid URL: '...'` is `Invalid URL (expected an http:// or https:// URL)`, and the `value` field of `NomlError::Type` holds a placeholder such as `<string>` instead of the value. Error variants are unchanged. Messages that start with `Environment variable`, `Duplicate key`, `Value is nested deeper`, `Unknown function`, `Unknown native type`, `Maximum include depth`, `include can only` and `Failed to parse include` keep those beginnings.
+
+### Docs
+- README: removed the "zero-copy" claims (strings are copied from the source), described the limits and include rules, and corrected the HTTP include section. `benches/toml_comparison.rs` parses with `toml::Table`, so the comparison runs again.
+
+MSRV is unchanged at 1.82.
 
 ## [0.9.3] - 2026-10-09
 
@@ -287,6 +318,7 @@ MSRV is unchanged at 1.82. Parsing speed is unchanged (within benchmark noise).
 ###################################################-->
 [unreleased]: https://github.com/noml-lang/noml-rust/compare/v0.10.0...HEAD
 [0.10.0]: https://github.com/noml-lang/noml-rust/compare/v0.9.3...v0.10.0
+[0.9.4]: https://github.com/noml-lang/noml-rust/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/noml-lang/noml-rust/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/noml-lang/noml-rust/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/noml-lang/noml-rust/compare/v0.9.0...v0.9.1
