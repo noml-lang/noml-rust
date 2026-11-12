@@ -49,7 +49,6 @@
 //! - **✅ Schema validation** for type safety and error prevention
 //! - **💬 Comment preservation** for tooling and round-trip editing
 //! - **🎯 Detailed error reporting** with precise source locations
-//! - **🚀 Zero-copy parsing** for optimal performance
 //! - **🔄 Async support** with tokio integration
 //!
 //! ## Native Types
@@ -225,7 +224,7 @@ pub use config::Config;
 pub use error::{NomlError, Result};
 pub use parser::ast::AstNode;
 pub use parser::{parse_file, parse_string, Document};
-pub use resolver::{NativeResolver, Resolver, ResolverConfig};
+pub use resolver::{NativeResolver, Resolver, ResolverConfig, ResolverLimits};
 pub use serializer::{serialize_document, serialize_document_with_options, Serializer};
 pub use value::Value;
 
@@ -347,8 +346,9 @@ pub fn parse(source: &str) -> Result<Value> {
 /// use noml::parse_from_file;
 ///
 /// // config/main.noml contains:
-/// // include "database.noml"  # Resolves to config/database.noml
-/// // include "../shared.noml" # Resolves to shared.noml
+/// // include "database.noml"     # Resolves to config/database.noml
+/// // include "db/replicas.noml" # Resolves to config/db/replicas.noml
+/// // include "../shared.noml"    # Refused: outside config/ (see Resolver::with_include_root)
 ///
 /// let config = parse_from_file("config/main.noml")?;
 ///
@@ -357,7 +357,8 @@ pub fn parse(source: &str) -> Result<Value> {
 ///
 /// # File Resolution
 ///
-/// - Relative includes are resolved from the directory containing the main file
+/// - Relative includes are resolved from the directory containing the main file,
+///   and must stay inside it
 /// - Environment variables are resolved from the current process environment
 /// - Native types are processed according to their specific parsers
 ///
@@ -714,7 +715,8 @@ where
 /// Save a NOML document to a file with format preservation.
 ///
 /// Serializes the document and writes it to the specified file path, preserving
-/// all original formatting, comments, and style.
+/// all original formatting, comments, and style. The file is replaced
+/// atomically, as with [`Config::save_to_file`].
 ///
 /// # Examples
 ///
@@ -736,7 +738,8 @@ where
 /// ```
 pub fn save_preserving<P: AsRef<Path>>(document: &Document, path: P) -> Result<()> {
     let content = serialize_document(document)?;
-    std::fs::write(path, content).map_err(|e| NomlError::io("Failed to write file", e))?;
+    config::write_atomic(path.as_ref(), content.as_bytes())
+        .map_err(|e| NomlError::io("Failed to write file", e))?;
     Ok(())
 }
 #[cfg(test)]

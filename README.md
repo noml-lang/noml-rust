@@ -21,7 +21,7 @@
 </div>
 <br><br>
 
-**NOML** (Nested Object Markup Language) is a **blazing-fast dynamic configuration language** that revolutionizes how you handle configuration files. With **industry-leading format preservation**, **zero-copy architecture**, and **25µs parsing performance**, NOML delivers both speed and power.
+**NOML** (Nested Object Markup Language) is a **blazing-fast dynamic configuration language** that revolutionizes how you handle configuration files. With **industry-leading format preservation** and **25µs parsing performance**, NOML delivers both speed and power.
 
 Unlike static markup languages, NOML is a **markup/scripting hybrid** that combines the simplicity of TOML with dynamic capabilities that traditional config formats simply cannot match.
 
@@ -29,7 +29,6 @@ Unlike static markup languages, NOML is a **markup/scripting hybrid** that combi
 
 - **⚡ 25µs parsing** - Legitimately high-performance by industry standards
 - **⚡ 37ns reads** - Blazing-fast value access with path-based navigation  
-- **⚡ Zero-copy architecture** - Optimized for real-world performance
 - **⚡ 47% faster** - Massive optimization improvements over previous versions
 
 ## 🎯 **Revolutionary Features**
@@ -183,6 +182,38 @@ How `${...}` works:
   included it. Values set with `Resolver::set_variable` are used when the document has
   no value at the path.
 
+### **Limits and Include Rules**
+
+Every resolve is bounded, so a short document cannot expand into gigabytes or
+run the program out of stack:
+
+| Limit | Default | Set with |
+|-------|---------|----------|
+| Total size of the values copied by `${...}` | 64 MiB | `ResolverLimits::with_max_output_bytes` |
+| Number of `${...}` references | 10,000 | `ResolverLimits::with_max_references` |
+| Length of a chain of references | 32 | `ResolverLimits::with_max_reference_depth` |
+| Number of included files | 256 | `ResolverLimits::with_max_includes` |
+| Body of an HTTP include | 1 MiB | `ResolverLimits::with_max_http_body_bytes` |
+
+Includes are read only from inside the include root: the directory of the file being
+parsed, or the directory set with `Resolver::with_include_root`. The check is made on the
+canonical path, so `..`, absolute paths and symbolic links cannot leave it. Text parsed
+with `parse` has no directory and cannot include files unless a root is set.
+`Resolver::allow_includes_anywhere(true)` turns the check off.
+
+```rust
+use noml::{parse_string, Resolver, ResolverLimits};
+
+let document = parse_string("name = \"app\"", None)?;
+let mut resolver = Resolver::new()
+    .with_include_root("config")
+    .with_limits(ResolverLimits::new().with_max_output_bytes(1 << 20));
+let value = resolver.resolve(&document)?;
+```
+
+Error messages give the line and column of a problem but do not repeat the text of the
+document, so a mistyped secret does not end up in a log.
+
 ### **Advanced Nesting & Arrays**
 ```noml
 [server.ssl]
@@ -269,7 +300,6 @@ them as strings.*
 **For Performance:**
 - **25µs parsing** - Legitimately fast by industry standards
 - **37ns reads** - Blazing-fast value access
-- **Zero-copy architecture** - Optimized for real-world usage
 - **Production ready** - 124 comprehensive tests
 
 **For Developer Experience:**
@@ -305,7 +335,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 ---
 
 <div align="center">
-    <strong>NOML 0.9.3 - High-Performance Dynamic Configuration</strong><br>
+    <strong>NOML 0.9.4 - High-Performance Dynamic Configuration</strong><br>
     <em>Blazing-fast • Feature-rich • Format-preserving</em>
 </div>
 
@@ -334,11 +364,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **HTTP Includes Features:**
-- ✅ **Secure HTTPS Support**: Full support for HTTPS URLs with proper certificate validation
+- **HTTPS only**: `http://` URLs are refused, certificates are checked, and redirects are not followed
+- **Size limit**: a response body over 1 MiB (`ResolverLimits::with_max_http_body_bytes`) is an error
 - ⚡ **Automatic Caching**: Remote configs are cached to improve performance and reduce network requests
 - 🔒 **Timeout Protection**: Configurable request timeouts prevent hanging operations
 - 🔄 **Error Handling**: Clear error messages for network issues, HTTP errors, and parse failures
-- 📦 **No Nested HTTP**: HTTP includes cannot contain other HTTP includes (prevents security issues)
+- **Confined documents**: a remote document cannot use `include` or `env()`, and its `${...}`
+  references can only name values in that document
 
 ```toml
 [dependencies]
