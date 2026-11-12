@@ -11,6 +11,7 @@ use crate::parser::ast::{
     StringStyle, TableEntry,
 };
 use crate::parser::lexer::{Lexer, StringStyle as LexerStringStyle, Token, TokenKind};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -88,15 +89,17 @@ impl<'a> NomlParser<'a> {
     fn parse_document(&mut self) -> Result<AstNode> {
         let start_span = self.current_span();
         let mut entries = Vec::new();
+        let mut index = SectionIndex::default();
         let mut comments = Comments::new();
 
         // Comments are attached to the entry or header that follows them
         let mut leading = self.take_comments();
         while !self.is_at_end() {
             if self.check_token(&TokenKind::LeftBracket) {
-                leading = self.parse_table_header(&mut entries, leading)?;
+                leading = self.parse_table_header(&mut entries, &mut index, leading)?;
             } else {
                 let entry = self.parse_key_value_pair(leading)?;
+                index.add(&entry.key, entries.len());
                 entries.push(entry);
                 leading = self.take_comments();
             }
@@ -121,6 +124,7 @@ impl<'a> NomlParser<'a> {
     fn parse_table_header(
         &mut self,
         entries: &mut Vec<TableEntry>,
+        index: &mut SectionIndex,
         leading: Vec<Comment>,
     ) -> Result<Vec<Comment>> {
         let start_span = self.current_span();
@@ -171,7 +175,14 @@ impl<'a> NomlParser<'a> {
             table_span,
         );
 
-        attach_section(entries, key, table_value, comments, is_array_of_tables)?;
+        attach_section(
+            entries,
+            index,
+            key,
+            table_value,
+            comments,
+            is_array_of_tables,
+        )?;
         Ok(leading)
     }
 
@@ -248,7 +259,7 @@ impl<'a> NomlParser<'a> {
                 quote_style: None,
             }),
             _ => Err(NomlError::unexpected_token(
-                format!("{}", token.kind),
+                token.kind.describe(),
                 "identifier or string",
                 token.span.start_line,
                 token.span.start_column,
@@ -272,11 +283,12 @@ impl<'a> NomlParser<'a> {
                 let token = self.advance()?;
                 Ok(AstNode::new(AstValue::Float { value, raw }, token.span))
             }
-            TokenKind::Identifier(name) => Err(NomlError::parse_with_suggestion(
-                format!("Unexpected identifier '{name}' where a value was expected"),
+            // The text is not repeated: an unquoted value is often a secret
+            TokenKind::Identifier(_) => Err(NomlError::parse_with_suggestion(
+                "Unexpected identifier where a value was expected",
                 token.span.start_line,
                 token.span.start_column,
-                format!("String values must be quoted: \"{name}\""),
+                "String values must be quoted, for example \"text\"",
             )),
 
             // Literals
@@ -297,7 +309,7 @@ impl<'a> NomlParser<'a> {
             TokenKind::Include => self.parse_include(),
 
             _ => Err(NomlError::parse_with_suggestion(
-                format!("Unexpected token: {}", token.kind),
+                format!("Unexpected token: {}", token.kind.describe()),
                 token.span.start_line,
                 token.span.start_column,
                 "Expected a value (string, number, boolean, array, or table)",
@@ -637,7 +649,7 @@ impl<'a> NomlParser<'a> {
                     return Err(NomlError::parse_with_suggestion(
                         format!(
                             "Expected a key name in interpolation path, found {}",
-                            token.kind
+                            token.kind.describe()
                         ),
                         token.span.start_line,
                         token.span.start_column,
@@ -679,7 +691,10 @@ impl<'a> NomlParser<'a> {
             TokenKind::String { value, .. } => value,
             other => {
                 return Err(NomlError::parse(
-                    format!("Expected a quoted file path after 'include', found {other}"),
+                    format!(
+                        "Expected a quoted file path after 'include', found {}",
+                        other.describe()
+                    ),
                     token.span.start_line,
                     token.span.start_column,
                 ));
@@ -868,16 +883,76 @@ impl<'a> NomlParser<'a> {
     }
 }
 
-/// True for an array built from `[[section]]` headers
-fn is_table_array(node: &AstNode) -> bool {
-    matches!(&node.value, AstValue::Array { elements, .. }
-        if !elements.is_empty()
-            && elements
-                .iter()
-                .all(|e| matches!(e.value, AstValue::Table { inline: false, .. })))
+/// Where the entries of one table are, so that placing a `[section]` does
+/// not scan every earlier entry (which made many headers quadratic).
+///
+/// Entries are found by their key names and then compared with `Key`
+/// equality, which also looks at quoting.
+#[derive(Default)]
+struct SectionIndex {
+    /// Positions of entries, by key names, in order
+    by_names: HashMap<Vec<String>, Vec<usize>>,
+    /// Positions of entries that are arrays of tables (`[[section]]`)
+    table_arrays: HashSet<usize>,
+    /// For each array of tables, the index of its last element
+    last_element: HashMap<usize, SectionIndex>,
 }
 
-/// Place a `[section]` or `[[section]]` in `entries`.
+impl SectionIndex {
+    fn names(segments: &[KeySegment]) -> Vec<String> {
+        segments.iter().map(|s| s.name.clone()).collect()
+    }
+
+    fn add(&mut self, key: &Key, position: usize) {
+        self.by_names
+            .entry(Self::names(&key.segments))
+            .or_default()
+            .push(position);
+    }
+
+    /// Index of a table's entries
+    fn of(entries: &[TableEntry]) -> Self {
+        let mut index = Self::default();
+        for (position, entry) in entries.iter().enumerate() {
+            index.add(&entry.key, position);
+        }
+        index
+    }
+
+    /// First entry whose key equals `segments`
+    fn find(
+        &self,
+        entries: &[TableEntry],
+        names: &[String],
+        segments: &[KeySegment],
+    ) -> Option<usize> {
+        self.by_names
+            .get(names)?
+            .iter()
+            .copied()
+            .find(|&i| entries[i].key.segments == segments)
+    }
+
+    /// Most recent array of tables whose key is a strict prefix of `key`
+    fn array_parent(&self, entries: &[TableEntry], key: &Key) -> Option<usize> {
+        let names = Self::names(&key.segments);
+        (1..key.segments.len())
+            .filter_map(|len| {
+                self.by_names
+                    .get(&names[..len])?
+                    .iter()
+                    .copied()
+                    .rev()
+                    .find(|&i| {
+                        self.table_arrays.contains(&i)
+                            && entries[i].key.segments == key.segments[..len]
+                    })
+            })
+            .max()
+    }
+}
+
+/// Place a `[section]` or `[[section]]` in `entries`, whose index is `index`.
 ///
 /// A section whose key extends an earlier `[[array]]` key belongs to the
 /// array's current last element (TOML rule), so it is stored inside that
@@ -885,36 +960,41 @@ fn is_table_array(node: &AstNode) -> bool {
 /// changing which element an earlier section refers to.
 fn attach_section(
     entries: &mut Vec<TableEntry>,
+    index: &mut SectionIndex,
     key: Key,
     table: AstNode,
     comments: Comments,
     is_array: bool,
 ) -> Result<()> {
-    // Most recent array-of-tables whose key is a strict prefix of this key
-    let parent = entries.iter_mut().rev().find(|e| {
-        e.key.segments.len() < key.segments.len()
-            && key.segments.starts_with(&e.key.segments)
-            && is_table_array(&e.value)
-    });
-    if let Some(parent) = parent {
-        let prefix = parent.key.segments.len();
-        if let AstValue::Array { elements, .. } = &mut parent.value.value {
+    if let Some(parent) = index.array_parent(entries, &key) {
+        let prefix = entries[parent].key.segments.len();
+        if let AstValue::Array { elements, .. } = &mut entries[parent].value.value {
             if let Some(AstValue::Table { entries: inner, .. }) =
                 elements.last_mut().map(|e| &mut e.value)
             {
+                let inner_index = index
+                    .last_element
+                    .entry(parent)
+                    .or_insert_with(|| SectionIndex::of(inner));
                 let rest = Key::dotted(key.segments[prefix..].to_vec(), key.span);
-                return attach_section(inner, rest, table, comments, is_array);
+                return attach_section(inner, inner_index, rest, table, comments, is_array);
             }
         }
     }
 
+    let names = SectionIndex::names(&key.segments);
     if is_array {
         // Add to the existing array of tables, or start one
-        if let Some(existing) = entries.iter_mut().find(|e| e.key == key) {
-            if is_table_array(&existing.value) {
-                if let AstValue::Array { elements, .. } = &mut existing.value.value {
+        if let Some(existing) = index.find(entries, &names, &key.segments) {
+            if index.table_arrays.contains(&existing) {
+                let element_index = match &table.value {
+                    AstValue::Table { entries: inner, .. } => SectionIndex::of(inner),
+                    _ => SectionIndex::default(),
+                };
+                if let AstValue::Array { elements, .. } = &mut entries[existing].value.value {
                     elements.push(table);
                 }
+                index.last_element.insert(existing, element_index);
                 return Ok(());
             }
             return Err(NomlError::parse(
@@ -923,7 +1003,10 @@ fn attach_section(
                 key.span.start_column,
             ));
         }
+        let position = entries.len();
         let span = table.span;
+        index.add(&key, position);
+        index.table_arrays.insert(position);
         entries.push(TableEntry {
             key,
             value: AstNode::new(
@@ -937,6 +1020,7 @@ fn attach_section(
             comments,
         });
     } else {
+        index.add(&key, entries.len());
         entries.push(TableEntry {
             key,
             value: table,

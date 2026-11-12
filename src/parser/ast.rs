@@ -6,6 +6,7 @@
 
 use crate::error::Result;
 use crate::value::Value;
+use std::cmp::Ordering;
 use std::fmt;
 
 /// Represents a complete NOML document with metadata
@@ -547,20 +548,16 @@ impl Span {
             start: self.start.min(other.start),
             end: self.end.max(other.end),
             start_line: self.start_line.min(other.start_line),
-            start_column: if self.start_line < other.start_line {
-                self.start_column
-            } else if self.start_line > other.start_line {
-                other.start_column
-            } else {
-                self.start_column.min(other.start_column)
+            start_column: match self.start_line.cmp(&other.start_line) {
+                Ordering::Less => self.start_column,
+                Ordering::Greater => other.start_column,
+                Ordering::Equal => self.start_column.min(other.start_column),
             },
             end_line: self.end_line.max(other.end_line),
-            end_column: if self.end_line > other.end_line {
-                self.end_column
-            } else if self.end_line < other.end_line {
-                other.end_column
-            } else {
-                self.end_column.max(other.end_column)
+            end_column: match self.end_line.cmp(&other.end_line) {
+                Ordering::Greater => self.end_column,
+                Ordering::Less => other.end_column,
+                Ordering::Equal => self.end_column.max(other.end_column),
             },
         }
     }

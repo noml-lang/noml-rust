@@ -85,11 +85,14 @@
 use crate::error::{NomlError, Result};
 use crate::parser::{parse, parse_from_file, Document};
 use crate::schema::Schema;
+use crate::tree::{self, Seg};
 use crate::value::Value;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// High-level configuration manager with change tracking and validation
 ///
@@ -142,6 +145,47 @@ pub struct Config {
     source_path: Option<PathBuf>,
     /// Whether the configuration has been modified
     modified: bool,
+    /// The computed values of the document (`env()`, `include`, `${...}`,
+    /// `@type()`), written back as expressions on save while unchanged
+    expressions: Vec<SavedExpression>,
+}
+
+/// An expression of the source document and the value it had when loaded
+#[derive(Debug, Clone)]
+struct SavedExpression {
+    location: Vec<Seg>,
+    text: String,
+    value: Value,
+}
+
+/// Resolve a document for [`Config`], keeping its expressions
+fn resolve_for_config(document: &Document) -> Result<(Value, Vec<SavedExpression>)> {
+    let mut resolver = crate::resolver::Resolver::new();
+    if let Some(dir) = document
+        .source_path
+        .as_deref()
+        .map(Path::new)
+        .and_then(Path::parent)
+    {
+        resolver = resolver.with_base_path(dir);
+    }
+    let (values, recorded) = resolver.resolve_recording(document)?;
+    let expressions = recorded
+        .into_iter()
+        .filter_map(|(location, node, value)| {
+            let value = match value {
+                Some(value) => value,
+                None => tree::get(&values, &location)?.clone(),
+            };
+            let text = crate::serializer::serialize_value_node(&node).ok()?;
+            Some(SavedExpression {
+                location,
+                text,
+                value,
+            })
+        })
+        .collect();
+    Ok((values, expressions))
 }
 
 /// Builder for creating configurations with specific options
@@ -174,33 +218,42 @@ impl Config {
             document,
             source_path: None,
             modified: false,
+            expressions: Vec::new(),
         }
     }
 
-    /// Load configuration from a string
+    /// Load configuration from a string.
+    ///
+    /// Text has no base path, so it cannot use `include` (see the
+    /// [resolver documentation](crate::resolver#includes)).
     pub fn from_string(content: &str) -> Result<Self> {
         let document = parse(content)?;
-        let values = document.to_value()?;
+        let (values, expressions) = resolve_for_config(&document)?;
 
         Ok(Self {
             document,
             values,
             source_path: None,
             modified: false,
+            expressions,
         })
     }
 
-    /// Load configuration from a file
+    /// Load configuration from a file.
+    ///
+    /// Includes are resolved relative to the file and must stay inside its
+    /// directory.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let document = parse_from_file(path)?;
-        let values = document.to_value()?;
+        let (values, expressions) = resolve_for_config(&document)?;
 
         Ok(Self {
             document,
             values,
             source_path: Some(path.to_path_buf()),
             modified: false,
+            expressions,
         })
     }
 
@@ -367,6 +420,14 @@ impl Config {
     ///
     /// Only works if the configuration was loaded from a file.
     ///
+    /// Values that came from an expression in the file (`env("NAME")`,
+    /// `include "file"`, `${path}`, `@size("10MB")` and the like) and were not
+    /// changed are written back as the expression, so a secret read with
+    /// `env()` is never written to the file. Values that were set, and
+    /// everything else, are written as plain values. Comments and layout are
+    /// not kept; use [`save_preserving`](crate::save_preserving) for that.
+    /// The file is replaced atomically (see [`Config::save_to_file`]).
+    ///
     /// # Example
     /// ```rust,no_run
     /// # use noml::Config;
@@ -387,6 +448,13 @@ impl Config {
 
     /// Save the configuration to a specific file
     ///
+    /// The text is written to a temporary file in the same directory, synced
+    /// and then renamed over `path`, so a crash never leaves a half-written
+    /// file. A symbolic link at `path` is replaced by the file, not followed.
+    /// On Unix the new file keeps the permissions of the file it replaces. On
+    /// Windows, if another program has the file open so that it cannot be
+    /// replaced, it is written in place instead.
+    ///
     /// # Example
     /// ```rust,no_run
     /// # use noml::Config;
@@ -396,7 +464,7 @@ impl Config {
     /// ```
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let content = self.to_string_representation()?;
-        fs::write(path, content)
+        write_atomic(path.as_ref(), content.as_bytes())
             .map_err(|e| NomlError::io("Failed to write configuration file".to_string(), e))?;
         Ok(())
     }
@@ -565,8 +633,15 @@ impl Config {
     /// Render the values as NOML text that parses back to the same values.
     fn to_string_representation(&self) -> Result<String> {
         let table = self.values.as_table()?;
+        let saved = Saved {
+            expressions: self
+                .expressions
+                .iter()
+                .map(|e| (e.location.as_slice(), e))
+                .collect(),
+        };
         let mut out = String::new();
-        write_table_body(&mut out, table, &mut Vec::new())?;
+        write_table_body(&mut out, table, &mut Vec::new(), &mut Vec::new(), &saved)?;
         Ok(out)
     }
 }
@@ -597,13 +672,14 @@ impl Config {
             &source,
             Some(path.as_ref().to_string_lossy().to_string()),
         )?;
-        let values = document.to_value()?;
+        let (values, expressions) = resolve_for_config(&document)?;
 
         Ok(Config {
             document,
             values,
             source_path: Some(path.as_ref().to_path_buf()),
             modified: false,
+            expressions,
         })
     }
 
@@ -624,7 +700,7 @@ impl Config {
     /// ```
     pub async fn save_async<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let content = self.to_string_representation()?;
-        tokio::fs::write(path.as_ref(), content)
+        write_atomic_async(path.as_ref(), content.as_bytes())
             .await
             .map_err(|e| NomlError::io(path.as_ref().to_string_lossy().to_string(), e))?;
         Ok(())
@@ -659,6 +735,7 @@ impl Config {
                 let reloaded = Self::load_async(path).await?;
                 self.document = reloaded.document;
                 self.values = reloaded.values;
+                self.expressions = reloaded.expressions;
                 self.modified = false;
                 Ok(())
             }
@@ -798,22 +875,49 @@ fn is_table_array(value: &Value) -> bool {
     matches!(value, Value::Array(items) if !items.is_empty() && items.iter().all(Value::is_table))
 }
 
+/// The expressions of the source document, by location
+struct Saved<'a> {
+    expressions: HashMap<&'a [Seg], &'a SavedExpression>,
+}
+
+impl Saved<'_> {
+    /// The expression written at `location`, if the value there is still
+    /// the one it produced
+    fn unchanged(&self, location: &[Seg], value: &Value) -> Option<&str> {
+        self.expressions
+            .get(location)
+            .filter(|saved| saved.value == *value)
+            .map(|saved| saved.text.as_str())
+    }
+}
+
 /// Write a table's entries: plain keys first, then `[table]` and `[[array]]`
-/// sections. `path` is the header path of `table`.
+/// sections. `path` is the header path of `table` and `location` its place
+/// in the value tree.
 fn write_table_body(
     out: &mut String,
     table: &BTreeMap<String, Value>,
     path: &mut Vec<String>,
+    location: &mut Vec<Seg>,
+    saved: &Saved<'_>,
 ) -> Result<()> {
     for (key, value) in table {
-        if !value.is_table() && !is_table_array(value) {
+        location.push(Seg::Key(key.clone()));
+        let expression = saved.unchanged(location, value);
+        if expression.is_some() || (!value.is_table() && !is_table_array(value)) {
             write_key(out, key);
             out.push_str(" = ");
-            write_literal(out, value)?;
+            write_literal(out, value, location, saved)?;
             out.push('\n');
         }
+        location.pop();
     }
     for (key, value) in table {
+        location.push(Seg::Key(key.clone()));
+        if saved.unchanged(location, value).is_some() {
+            location.pop();
+            continue;
+        }
         path.push(key.clone());
         match value {
             Value::Table(inner) => {
@@ -823,22 +927,25 @@ fn write_table_body(
                 out.push('[');
                 write_path(out, path);
                 out.push_str("]\n");
-                write_table_body(out, inner, path)?;
+                write_table_body(out, inner, path, location, saved)?;
             }
             Value::Array(items) if is_table_array(value) => {
-                for item in items {
+                for (i, item) in items.iter().enumerate() {
                     if !out.is_empty() {
                         out.push('\n');
                     }
                     out.push_str("[[");
                     write_path(out, path);
                     out.push_str("]]\n");
-                    write_table_body(out, item.as_table()?, path)?;
+                    location.push(Seg::Index(i));
+                    write_table_body(out, item.as_table()?, path, location, saved)?;
+                    location.pop();
                 }
             }
             _ => {}
         }
         path.pop();
+        location.pop();
     }
     Ok(())
 }
@@ -883,8 +990,17 @@ fn write_string(out: &mut String, s: &str, template_safe: bool) {
     out.push('"');
 }
 
-fn write_literal(out: &mut String, value: &Value) -> Result<()> {
+fn write_literal(
+    out: &mut String,
+    value: &Value,
+    location: &mut Vec<Seg>,
+    saved: &Saved<'_>,
+) -> Result<()> {
     use std::fmt::Write;
+    if let Some(expression) = saved.unchanged(location, value) {
+        out.push_str(expression);
+        return Ok(());
+    }
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(b) => {
@@ -910,7 +1026,9 @@ fn write_literal(out: &mut String, value: &Value) -> Result<()> {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                write_literal(out, item)?;
+                location.push(Seg::Index(i));
+                write_literal(out, item, location, saved)?;
+                location.pop();
             }
             out.push(']');
         }
@@ -920,7 +1038,9 @@ fn write_literal(out: &mut String, value: &Value) -> Result<()> {
                 out.push_str(if i > 0 { ", " } else { " " });
                 write_key(out, key);
                 out.push_str(" = ");
-                write_literal(out, item)?;
+                location.push(Seg::Key(key.clone()));
+                write_literal(out, item, location, saved)?;
+                location.pop();
             }
             out.push_str(if table.is_empty() { "}" } else { " }" });
         }
@@ -944,6 +1064,132 @@ fn write_literal(out: &mut String, value: &Value) -> Result<()> {
         Value::DateTime(dt) => write_string(out, &dt.to_rfc3339(), true),
     }
     Ok(())
+}
+
+/// Temporary files made by [`write_atomic`] in this process
+static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+/// A fresh temporary file name next to `path`
+fn temp_path(path: &Path) -> io::Result<PathBuf> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the path has no file name"))?;
+    let mut temp = std::ffi::OsString::from(".");
+    temp.push(name);
+    temp.push(format!(
+        ".{}.{}.tmp",
+        std::process::id(),
+        TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    Ok(path.with_file_name(temp))
+}
+
+/// Replace the file at `path` with `content` atomically: write a temporary
+/// file in the same directory, sync it, then rename it over `path`.
+///
+/// A symbolic link at `path` is replaced, not followed. On Unix the new
+/// file keeps the permissions of the file it replaces.
+pub(crate) fn write_atomic(path: &Path, content: &[u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    let permissions = fs::metadata(path).ok().map(|m| m.permissions());
+    let mut attempts = 0;
+    let (temp, mut file) = loop {
+        let temp = temp_path(path)?;
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+        {
+            Ok(file) => break (temp, file),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && attempts < 16 => attempts += 1,
+            Err(e) => return Err(e),
+        }
+    };
+    let result = (|| {
+        file.write_all(content)?;
+        #[cfg(unix)]
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
+        file.sync_all()?;
+        drop(file);
+        match fs::rename(&temp, path) {
+            // Windows before Rust 1.85 cannot rename over a file that another
+            // handle has open; write in place as earlier versions did
+            #[cfg(windows)]
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && path.is_file() => {
+                fs::write(path, content)?;
+                fs::remove_file(&temp)
+            }
+            other => other,
+        }
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+        return result;
+    }
+    // Make the rename itself durable
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        if let Ok(dir) = fs::File::open(dir) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
+}
+
+/// [`write_atomic`] with async file operations
+#[cfg(feature = "async")]
+async fn write_atomic_async(path: &Path, content: &[u8]) -> io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    #[cfg(unix)]
+    let permissions = tokio::fs::metadata(path)
+        .await
+        .ok()
+        .map(|m| m.permissions());
+    let mut attempts = 0;
+    let (temp, mut file) = loop {
+        let temp = temp_path(path)?;
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .await
+        {
+            Ok(file) => break (temp, file),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && attempts < 16 => attempts += 1,
+            Err(e) => return Err(e),
+        }
+    };
+    let result = async {
+        file.write_all(content).await?;
+        file.flush().await?;
+        #[cfg(unix)]
+        if let Some(permissions) = permissions {
+            tokio::fs::set_permissions(&temp, permissions).await?;
+        }
+        file.sync_all().await?;
+        drop(file);
+        match tokio::fs::rename(&temp, path).await {
+            // See write_atomic
+            #[cfg(windows)]
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied && path.is_file() => {
+                tokio::fs::write(path, content).await?;
+                tokio::fs::remove_file(&temp).await
+            }
+            other => other,
+        }
+    }
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&temp).await;
+    }
+    result
 }
 
 #[cfg(test)]

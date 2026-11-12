@@ -14,7 +14,7 @@
 # ▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒░
 [package]#▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░▒
 name = "noml"
-version = "0.9.3"
+version = "0.9.4"
 
 # RUST VERSION
 # ═════════════════════════════════════════⬡
@@ -32,7 +32,7 @@ readme  = "README.md"
 
 # DESCRIPTION
 # ═════════════════════════════════════════⬡
-description = "High-performance dynamic configuration language with format preservation, environment variables, native types, string interpolation, and TOML compatibility. Blazing-fast parsing at 25µs with zero-copy architecture."
+description = "High-performance dynamic configuration language with format preservation, environment variables, native types, string interpolation, and TOML compatibility. Fast parsing at about 25µs."
 
 # LINK (At least 1)
 # ═════════════════════════════════════════⬡

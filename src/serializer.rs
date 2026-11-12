@@ -500,6 +500,14 @@ pub fn serialize_document(document: &Document) -> Result<String> {
     serializer.serialize_document(document)
 }
 
+/// Write one node as NOML text in value position (used by `Config::save` to
+/// keep expressions as written)
+pub(crate) fn serialize_value_node(node: &AstNode) -> Result<String> {
+    let mut serializer = Serializer::new();
+    serializer.serialize_ast_node(node)?;
+    Ok(serializer.output)
+}
+
 /// High-level function to serialize a document with custom formatting
 pub fn serialize_document_with_options(
     document: &Document,

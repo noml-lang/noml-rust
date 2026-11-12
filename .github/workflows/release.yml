@@ -191,8 +191,9 @@ jobs:
     needs: publish-crate
     runs-on: ubuntu-latest
     # Only for new tags; a manual rebuild of an old release must not replace
-    # the published docs with older ones
-    if: always() && github.event_name == 'push' && needs.publish-crate.result == 'success'
+    # the published docs with older ones, and neither must a 0.9.x
+    # maintenance release made after 0.10.0
+    if: always() && github.event_name == 'push' && needs.publish-crate.result == 'success' && !startsWith(github.ref_name, 'v0.9.')
     steps:
       - name: Checkout
         uses: actions/checkout@v6

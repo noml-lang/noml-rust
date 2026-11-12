@@ -41,7 +41,7 @@ enabled = false
 
     group.bench_function("toml_parse", |b| {
         b.iter(|| {
-            let _: toml::Value = black_box(toml_content).parse().unwrap();
+            let _: toml::Table = black_box(toml_content).parse().unwrap();
         })
     });
 
