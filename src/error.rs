@@ -4,130 +4,119 @@
 //! Designed for clarity, debuggability, and extensibility.
 
 use std::io;
-use thiserror::Error;
 
 /// The main result type used throughout NOML operations.
 pub type Result<T> = std::result::Result<T, NomlError>;
 
-/// Comprehensive error types for all NOML operations.
-///
-/// This error system is designed to provide maximum clarity about what went wrong,
-/// where it happened, and how to fix it. Each variant includes enough context
-/// for both developers and end users to understand and resolve issues.
-///
-/// The enum is `#[non_exhaustive]`: match it with a `_` arm.
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum NomlError {
-    #[error("Parse error at line {line}, column {column}: {message}")]
-    /// Parsing errors - when the input cannot be parsed due to syntax issues.
-    Parse {
-        /// Human-readable error message
-        message: String,
-        /// Line number where error occurred (1-indexed)
-        line: usize,
-        /// Column number where error occurred (1-indexed)
-        column: usize,
-        /// Optional source code snippet showing the error
-        snippet: Option<String>,
-    },
+define_err::define_errors! {
+    /// Comprehensive error types for all NOML operations.
+    ///
+    /// This error system is designed to provide maximum clarity about what went wrong,
+    /// where it happened, and how to fix it. Each variant includes enough context
+    /// for both developers and end users to understand and resolve issues.
+    ///
+    /// The enum is `#[non_exhaustive]`: match it with a `_` arm.
+    #[non_exhaustive]
+    pub enum NomlError {
+        /// Parsing errors - when the input cannot be parsed due to syntax issues.
+        Parse {
+            /// Human-readable error message
+            message: String,
+            /// Line number where error occurred (1-indexed)
+            line: usize,
+            /// Column number where error occurred (1-indexed)
+            column: usize,
+            /// Optional source code snippet showing the error
+            snippet: Option<String>,
+        } => "Parse error at line {line}, column {column}: {message}",
 
-    /// Validation errors - when NOML is syntactically correct but semantically invalid
-    #[error("Validation error: {message}")]
-    Validation {
-        /// Description of the validation failure
-        message: String,
-        /// Path to the invalid key/section
-        path: Option<String>,
-    },
+        /// Validation errors - when NOML is syntactically correct but semantically invalid
+        Validation {
+            /// Description of the validation failure
+            message: String,
+            /// Path to the invalid key/section
+            path: Option<String>,
+        } => "Validation error: {message}",
 
-    /// Key access errors - when requesting non-existent keys
-    #[error("Key '{key}' not found")]
-    KeyNotFound {
-        /// The key that was requested
-        key: String,
-        /// Available keys at that level (for suggestions)
-        available: Vec<String>,
-    },
+        /// Key access errors - when requesting non-existent keys
+        KeyNotFound {
+            /// The key that was requested
+            key: String,
+            /// Available keys at that level (for suggestions)
+            available: Vec<String>,
+        } => "Key '{key}' not found",
 
-    /// Type conversion errors - when values cannot be converted to requested type
-    #[error("Type error: cannot convert '{value}' to {expected_type}")]
-    Type {
-        /// The value that couldn't be converted
-        value: String,
-        /// The expected type
-        expected_type: String,
-        /// The actual type found
-        actual_type: String,
-    },
+        /// Type conversion errors - when values cannot be converted to requested type
+        Type {
+            /// The value that couldn't be converted
+            value: String,
+            /// The expected type
+            expected_type: String,
+            /// The actual type found
+            actual_type: String,
+        } => "Type error: cannot convert '{value}' to {expected_type}",
 
-    /// File I/O errors - wraps std::io::Error with additional context
-    #[error("File error for '{path}': {source}")]
-    Io {
-        /// Path to the file that caused the error
-        path: String,
-        /// The underlying I/O error
-        #[source]
-        source: io::Error,
-    },
+        /// File I/O errors - wraps std::io::Error with additional context
+        Io {
+            /// Path to the file that caused the error
+            path: String,
+            /// The underlying I/O error
+            #[source]
+            source: io::Error,
+        } => "File error for '{path}': {source}",
 
-    /// Variable interpolation errors
-    #[error("Interpolation error: {message}")]
-    Interpolation {
-        /// Description of the interpolation failure
-        message: String,
-        /// The variable expression that failed
-        expression: String,
-        /// Path in the document where this occurred
-        context: Option<String>,
-    },
+        /// Variable interpolation errors
+        Interpolation {
+            /// Description of the interpolation failure
+            message: String,
+            /// The variable expression that failed
+            expression: String,
+            /// Path in the document where this occurred
+            context: Option<String>,
+        } => "Interpolation error: {message}",
 
-    /// Environment variable errors
-    #[error("Environment variable '{var}' is not set")]
-    EnvVar {
-        /// Name of the missing environment variable
-        var: String,
-        /// Whether a default was expected
-        has_default: bool,
-    },
+        /// Environment variable errors
+        EnvVar {
+            /// Name of the missing environment variable
+            var: String,
+            /// Whether a default was expected
+            has_default: bool,
+        } => "Environment variable '{var}' is not set",
 
-    /// Import/include file errors
-    #[error("Import error: failed to import '{path}': {reason}")]
-    Import {
-        /// Path that failed to import
-        path: String,
-        /// Reason for import failure
-        reason: String,
-        /// Path of the file that tried to do the import
-        from: Option<String>,
-    },
+        /// Import/include file errors
+        Import {
+            /// Path that failed to import
+            path: String,
+            /// Reason for import failure
+            reason: String,
+            /// Path of the file that tried to do the import
+            from: Option<String>,
+        } => "Import error: failed to import '{path}': {reason}",
 
-    /// Schema validation errors
-    #[error("Schema error at '{path}': {message}")]
-    Schema {
-        /// Path where schema validation failed
-        path: String,
-        /// Description of the schema violation
-        message: String,
-        /// Expected schema type/format
-        expected: Option<String>,
-    },
+        /// Schema validation errors
+        Schema {
+            /// Path where schema validation failed
+            path: String,
+            /// Description of the schema violation
+            message: String,
+            /// Expected schema type/format
+            expected: Option<String>,
+        } => "Schema error at '{path}': {message}",
 
-    /// Circular reference errors (for imports and references)
-    #[error("Circular reference detected: {chain}")]
-    CircularReference {
-        /// The chain of references that caused the cycle
-        chain: String,
-    },
+        /// Circular reference errors (for imports and references)
+        CircularReference {
+            /// The chain of references that caused the cycle
+            chain: String,
+        } => "Circular reference detected: {chain}",
 
-    /// Internal errors - these should never happen in normal operation
-    #[error("Internal error: {message}")]
-    Internal {
-        /// Description of the internal error
-        message: String,
-        /// Optional context about where this occurred
-        context: Option<String>,
-    },
+        /// Internal errors - these should never happen in normal operation
+        Internal {
+            /// Description of the internal error
+            message: String,
+            /// Optional context about where this occurred
+            context: Option<String>,
+        } => "Internal error: {message}",
+    }
 }
 
 impl NomlError {

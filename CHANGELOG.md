@@ -8,6 +8,9 @@
 
 The security fixes and limits released in 0.9.4 (see below) are part of this line too: `ResolverLimits`, include roots, errors without input text, `Config::save` keeping expressions, atomic saves, confined HTTP includes, linear-time table headers and exact `@size`.
 
+### Changed
+- `NomlError` is declared with `define-err` instead of `thiserror`: no proc macro and no build dependency. Its variants, fields, messages, `source()`, and `#[non_exhaustive]` are unchanged, and so are `category()`, `is_recoverable()`, and `user_message()`.
+
 ## [0.10.0] - 2026-10-09
 
 This release adds TOML date-time literals, which needs a new syntax-tree variant, so it is a breaking release. It also makes the remaining breaking cleanups at the same time, so the public enums can grow from here on without another break.
