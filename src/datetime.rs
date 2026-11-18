@@ -146,8 +146,8 @@ impl FromStr for Datetime {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match lex(s) {
             Ok(Some((dt, len))) if len == s.len() => Ok(dt),
-            Ok(_) => Err(NomlError::validation(format!("Invalid date/time: '{s}'"))),
-            Err(message) => Err(NomlError::validation(format!("{message}: '{s}'"))),
+            Ok(_) => Err(NomlError::validation("Invalid date/time")),
+            Err(message) => Err(NomlError::validation(message)),
         }
     }
 }
